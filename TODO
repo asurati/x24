@@ -1,0 +1,7 @@
+- When arg-substituting, each arg must maintain the same white-space distance
+  from the previous token as maintained by the corresponding macro in the
+  replacement-list. If the arg corresponds to the first element in the
+  replacement-list, its first token must maintain the same white-space distance
+  as maintained by the invocation from the token previous to the invocation.
+- Support __has_include, __has_embed __has_c_attribute.
+- Convert cpp_tokens into cc_tokens, and begin parsing the C grammar.
