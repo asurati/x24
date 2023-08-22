@@ -2067,6 +2067,7 @@ build:
 	err = cpp_token_stream_remove_head(&stream, &token);
 	if (err)
 		return err;
+	lexer_delete(lexer);
 	assert(cpp_token_is_string_literal(token));
 	assert(cpp_token_type(token) == LXR_TOKEN_CHAR_STRING_LITERAL);
 	token->has_white_space = has_white_space;
@@ -3343,6 +3344,13 @@ err_t scanner_scan_file(struct scanner *this,
 		if (err)
 			break;
 		assert(cpp_token_stream_is_empty(&stream));
+
+		/*
+		 * Note that some tokens may have no whitespace preceding it. In that
+		 * case, accidental pasting may be seen in the output. However, only
+		 * this print loop is affected. When the tokens are serialized, and
+		 * then processed, they remain separate as they are now.
+		 */
 		printf("%s:", __func__);
 		queue_for_each(&output, i, token) {
 			if (cpp_token_has_white_space(token))
