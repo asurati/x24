@@ -230,8 +230,7 @@ static inline
 void queue_empty(struct queue *this)
 {
 	while (!queue_is_empty(this))
-		this->delete(queue_remove_tail(this));
-	queue_delete(this);
+		queue_delete_tail(this);
 }
 
 static inline
