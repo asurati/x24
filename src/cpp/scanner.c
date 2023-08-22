@@ -1618,12 +1618,11 @@ err_t scanner_scan_directive_elif(struct scanner *this,
 	cistk = &this->cistk;
 	assert(!stack_is_empty(cistk));
 
+	/* We must pop as the later in_skip_zone calc works with a stale value. */
 	/* If the tos has else, invalid */
-	entry = stack_peek(cistk);
+	entry = stack_pop(cistk);
 	if (entry->type == LXR_TOKEN_DIRECTIVE_ELSE)
 		return EINVAL;
-
-	/* Instead of pop/push, modify the top entry */
 	assert(entry->type == LXR_TOKEN_DIRECTIVE_IF);
 
 	/* If the if was in scan/done state, or we are in skip-zone, done */
@@ -1631,8 +1630,9 @@ err_t scanner_scan_directive_elif(struct scanner *this,
 		entry->state == COND_INCL_STATE_DONE ||
 		cond_incl_stack_in_skip_zone(cistk)) {
 		entry->state = COND_INCL_STATE_DONE;
-		return ESUCCESS;
+		return stack_push(cistk, entry);
 	}
+	free(entry);
 	/* We aren't in a skip-zone. Place appropriate state. */
 	return scanner_scan_directive_if(this, line);
 }
@@ -1659,13 +1659,13 @@ err_t scanner_scan_directive_else(struct scanner *this)
 	cistk = &this->cistk;
 	assert(!stack_is_empty(cistk));
 
+	/* We must pop as the later in_skip_zone calc works with a stale value. */
 	/* If the tos already has else, invalid */
-	entry = stack_peek(cistk);
+	entry = stack_pop(cistk);
 	if (entry->type == LXR_TOKEN_DIRECTIVE_ELSE)
 		return EINVAL;
-
-	/* instead of pop/push, modify the top */
 	assert(entry->type == LXR_TOKEN_DIRECTIVE_IF);
+
 	entry->type = LXR_TOKEN_DIRECTIVE_ELSE;
 
 	/* If the if was in scan/done state, or we are in skip-zone, done */
@@ -1673,13 +1673,13 @@ err_t scanner_scan_directive_else(struct scanner *this)
 		entry->state == COND_INCL_STATE_DONE ||
 		cond_incl_stack_in_skip_zone(cistk)) {
 		entry->state = COND_INCL_STATE_DONE;
-		return ESUCCESS;
+		return stack_push(cistk, entry);
 	}
 
 	/* We aren't in a skip-zone, and if was in wait. place scan. */
 	assert(entry->state == COND_INCL_STATE_WAIT);
 	entry->state = COND_INCL_STATE_SCAN;
-	return ESUCCESS;
+	return stack_push(cistk, entry);
 }
 
 /* the first token in the line is the identifier */
@@ -1704,12 +1704,11 @@ err_t scanner_scan_directive_elifdef(struct scanner *this,
 	cistk = &this->cistk;
 	assert(!stack_is_empty(cistk));
 
+	/* We must pop as the later in_skip_zone calc works with a stale value. */
 	/* If the tos has else, invalid */
-	entry = stack_peek(cistk);
+	entry = stack_pop(cistk);
 	if (entry->type == LXR_TOKEN_DIRECTIVE_ELSE)
 		return EINVAL;
-
-	/* Instead of pop/push, modify the top entry */
 	assert(entry->type == LXR_TOKEN_DIRECTIVE_IF);
 
 	/* If the if was in scan/done state, or we are in skip-zone, done */
@@ -1717,7 +1716,7 @@ err_t scanner_scan_directive_elifdef(struct scanner *this,
 		entry->state == COND_INCL_STATE_DONE ||
 		cond_incl_stack_in_skip_zone(cistk)) {
 		entry->state = COND_INCL_STATE_DONE;
-		return ESUCCESS;
+		return stack_push(cistk, entry);
 	}
 
 	/* We aren't in a skip-zone. Place appropriate state. */
@@ -1727,7 +1726,7 @@ err_t scanner_scan_directive_elifdef(struct scanner *this,
 	macro = scanner_find_macro(this, name);
 	if ((is_ndef && macro == NULL) || (!is_ndef && macro))
 		entry->state = COND_INCL_STATE_SCAN;	/* true. */
-	return ESUCCESS;
+	return stack_push(cistk, entry);
 }
 
 /* the first token in the line is the identifier */
