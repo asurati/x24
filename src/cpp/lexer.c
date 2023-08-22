@@ -28,13 +28,13 @@ static
 err_t	lexer_lex_identifier(struct lexer *this,
 							 struct lexer_token *out);
 /*****************************************************************************/
-static const char *g_lexer_token_type_strs[] = {
+static const char *g_lexer_token_type_str[] = {
 #define DEF(t)	"LXR_" # t,
 #include <inc/cpp/tokens.h>
 #undef DEF
 };
 
-static const char *g_punctuators[] = {
+static const char *g_punctuator[] = {
 	/* Single-char tokens */
 	"{",
 	"[",
@@ -92,7 +92,7 @@ static const char *g_punctuators[] = {
 	"...",
 };
 
-static const char *g_key_words[] = {
+static const char *g_key_word[] = {
 	"_Atomic",
 	"_BitInt",
 	"_Complex",
@@ -421,13 +421,13 @@ err_t lexer_build_source(struct lexer *this,
 
 	/* punctuators do not need to alloc memory for storing src/reslvd */
 	if (type >= LXR_TOKEN_LEFT_BRACE && type <= LXR_TOKEN_ELLIPSIS) {
-		token->source = g_punctuators[type - LXR_TOKEN_LEFT_BRACE];
+		token->source = g_punctuator[type - LXR_TOKEN_LEFT_BRACE];
 		goto same_resolved;
 	}
 
 	/* key-words do not need to alloc memory for storing src/reslvd */
 	if (type >= LXR_TOKEN_ATOMIC && type <= LXR_TOKEN_DIRECTIVE_WARNING) {
-		token->source = g_key_words[type - LXR_TOKEN_ATOMIC];
+		token->source = g_key_word[type - LXR_TOKEN_ATOMIC];
 		goto same_resolved;
 	}
 
@@ -591,7 +591,7 @@ void lexer_token_print(const struct lexer_token *this,
 					   const struct lexer_position *begin,
 					   const char *msg)
 {
-	const char *type = g_lexer_token_type_strs[this->type];
+	const char *type = g_lexer_token_type_str[this->type];
 	/*
 	 * p for lexer-position.
 	 * f for file-position.
@@ -1364,8 +1364,8 @@ err_t lexer_token_store_code_point(struct lexer_token *this,
 	char16_t *utf16_string;
 	char32_t *utf32_string;
 	off_t string_len;
-	char utf8_code_units[4];
-	char16_t utf16_code_units[2];
+	char utf8_code_unit[4];
+	char16_t utf16_code_unit[2];
 	char num_code_units;
 	enum lexer_token_type type;
 
@@ -2254,11 +2254,11 @@ err_t lexer_lex_identifier(struct lexer *this,
 	}
 	out->type = LXR_TOKEN_IDENTIFIER;
 	str = this->buffer + this->begin.lex_pos;
-	for (i = 0; i < (int)ARRAY_SIZE(g_key_words); ++i) {
+	for (i = 0; i < (int)ARRAY_SIZE(g_key_word); ++i) {
 		/* char8_t -> char pointer */
-		if (strncmp(g_key_words[i], str, out->lex_size))
+		if (strncmp(g_key_word[i], str, out->lex_size))
 			continue;
-		if (g_key_words[i][out->lex_size] != NULL_CHAR)
+		if (g_key_word[i][out->lex_size] != NULL_CHAR)
 			continue;
 		out->type += i + 1;
 		return ESUCCESS;
