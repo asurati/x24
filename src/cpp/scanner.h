@@ -19,12 +19,6 @@ struct cpp_token {
 };
 
 static inline
-char32_t cpp_token_char_const_value(const struct cpp_token *this)
-{
-	return lexer_token_char_const_value(this->base);
-}
-
-static inline
 const char *cpp_token_source(const struct cpp_token *this)
 {
 	return lexer_token_source(this->base);

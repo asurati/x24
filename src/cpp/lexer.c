@@ -411,6 +411,7 @@ err_t lexer_build_source(struct lexer *this,
 	struct lexer_position save;
 	struct code_point cp;
 	char *string;
+	const char *p;
 
 	assert(token->source == NULL);
 	assert(token->resolved == NULL);
@@ -431,6 +432,10 @@ err_t lexer_build_source(struct lexer *this,
 		goto same_resolved;
 	}
 
+	/*
+	 * build the source for string-literal/char-const, but do not resolve or
+	 * evaluate.
+	 */
 	if (lexer_token_is_char_const(token) ||
 		lexer_token_is_string_literal(token))
 		goto same_resolved;	/* fall-thru with source == NULL */
@@ -479,24 +484,25 @@ same_resolved:
 			 is_oct_digit(cp.cp)))
 			has_esc_seq = true;
 		was_prev_back_slash = cp.cp == '\\';
-		memcpy(&string[i], &cp.cp, cp.cp_size);
+		p = this->buffer + cp.begin.lex_pos;
+		memcpy(&string[i], p, cp.cp_size);
 		i += cp.cp_size;
 		lexer_consume_code_point(this, &cp);
 	}
 	token->source = string;
-	assert(has_esc_seq == false);	/* TODO */
+	token->source_len = token->lex_size;
 
 	/* Don't resolve string-literal and char-const at this time */
 	if (lexer_token_is_string_literal(token) ||
 		lexer_token_is_char_const(token))
 		goto err0;
 
+	assert(has_esc_seq == false);	/* TODO */
 	if (!has_esc_seq) {
 		token->resolved = token->source;
-		token->resolved_len = token->source_len = token->lex_size;
+		token->resolved_len = token->source_len;
 		goto err0;
 	}
-
 	/* fall-thru */
 err0:
 	this->position = save;
@@ -565,7 +571,6 @@ err_t code_point_to_utf16(const char32_t this,
 void lexer_token_init(struct lexer_token *this)
 {
 	memset(this, 0, sizeof(*this));
-	this->value = -1;
 }
 #if 0
 void lexer_token_print_string(const struct lexer_token *this)
@@ -980,7 +985,8 @@ void lexer_skip_multi_line_comment(struct lexer *this)
 static
 err_t lexer_lex_ucn_escape_char(struct lexer *this,
 								const int num_digits,
-								struct lexer_token *out)
+								char32_t *out_value,
+								size_t *out_lex_size)
 {
 	err_t err;
 	int i;
@@ -994,7 +1000,6 @@ err_t lexer_lex_ucn_escape_char(struct lexer *this,
 			return err;
 		if (!is_hex_digit(cp.cp))
 			return EINVAL;
-
 		t[0] = t[1] << 4;
 		if (t[0] < t[1])
 			return EINVAL;	/* overflow */
@@ -1003,7 +1008,8 @@ err_t lexer_lex_ucn_escape_char(struct lexer *this,
 			return EINVAL;	/* overflow */
 		t[1] = t[0];
 		lexer_consume_code_point(this, &cp);
-		out->lex_size += cp.cp_size;
+		if (out_lex_size)
+			*out_lex_size += cp.cp_size;
 	}
 
 	/*
@@ -1017,16 +1023,16 @@ err_t lexer_lex_ucn_escape_char(struct lexer *this,
 		return EINVAL;
 	if (t[1] > 0x10ffff)
 		return EINVAL;
-	out->value = t[1];
+	*out_value = t[1];
 	return err;
 }
 
 /* One escape char */
 /* max munch until we reach a non-hex char. */
-#if 0
 static
 err_t lexer_lex_hex_escape_char(struct lexer *this,
-								struct lexer_token *out)
+								char32_t *out_value,
+								size_t *out_lex_size)
 {
 	err_t err;
 	char32_t t[2];
@@ -1035,11 +1041,12 @@ err_t lexer_lex_hex_escape_char(struct lexer *this,
 	t[0] = t[1] = 0;
 	while (true) {
 		err = lexer_peek_code_point(this, &cp);
+		if (err == EOF) {
+			err = ESUCCESS;
+			break;
+		}
 		if (err)
 			return err;
-		if (!is_hex_digit(cp.cp))
-			break;
-
 		t[0] = t[1] << 4;
 		if (t[0] < t[1])
 			return EINVAL;	/* overflow */
@@ -1048,9 +1055,10 @@ err_t lexer_lex_hex_escape_char(struct lexer *this,
 			return EINVAL;	/* overflow */
 		t[1] = t[0];
 		lexer_consume_code_point(this, &cp);
-		out->lex_size += cp.cp_size;
+		if (out_lex_size)
+			*out_lex_size += cp.cp_size;
 	}
-	out->code_point = t[1];
+	*out_value = t[1];
 	return err;
 }
 
@@ -1061,7 +1069,8 @@ err_t lexer_lex_hex_escape_char(struct lexer *this,
  */
 static
 err_t lexer_lex_oct_escape_char(struct lexer *this,
-								struct lexer_token *out)
+								char32_t *out_value,
+								size_t *out_lex_size)
 {
 	err_t err;
 	int i;
@@ -1072,11 +1081,14 @@ err_t lexer_lex_oct_escape_char(struct lexer *this,
 	t[0] = t[1] = 0;
 	for (i = 0; i < 3; ++i) {
 		err = lexer_peek_code_point(this, &cp);
+		if (err == EOF) {
+			err = ESUCCESS;
+			break;
+		}
 		if (err)
 			return err;
 		if (!is_oct_digit(cp.cp))
 			break;
-
 		t[0] = t[1] << 3;
 		if (t[0] < t[1])
 			return EINVAL;	/* overflow */
@@ -1085,17 +1097,19 @@ err_t lexer_lex_oct_escape_char(struct lexer *this,
 			return EINVAL;	/* overflow */
 		t[1] = t[0];
 		lexer_consume_code_point(this, &cp);
-		out->lex_size += cp.cp_size;
+		if (out_lex_size)
+			*out_lex_size += cp.cp_size;
 	}
-	out->code_point = t[1];
+	*out_value = t[1];
 	return err;
 }
 
-/* One escape char */
+/* One escape char. The lexer is positioned just after the back-slash */
 static
 err_t lexer_lex_escape_char(struct lexer *this,
 							enum char_const_escape_type *out_esc_type,
-							struct lexer_token *out)
+							char32_t *out_value,
+							size_t *out_lex_size)
 {
 	err_t err;
 	char32_t c32;
@@ -1111,38 +1125,40 @@ err_t lexer_lex_escape_char(struct lexer *this,
 		cp.cp == 'a' || cp.cp == 'b' || cp.cp == 'f' || cp.cp == 'n' ||
 		cp.cp == 'r' || cp.cp == 't' || cp.cp == 'v') {
 		lexer_consume_code_point(this, &cp);
-		out->lex_size += cp.cp_size;
+		if (out_lex_size)
+			*out_lex_size += cp.cp_size;
 		/*
 		 * Although the lex_size of simple escs is 2, the value is a single
 		 * code-unit.
 		 */
 		if (cp.cp == '\'' || cp.cp == '\"' || cp.cp == '?' || cp.cp == '\\')
-			out->code_point = cp.cp;
+			*out_value = cp.cp;
 		if (cp.cp == 'a')
-			out->code_point = '\a';
+			*out_value = '\a';
 		if (cp.cp == 'b')
-			out->code_point = '\b';
+			*out_value = '\b';
 		if (cp.cp == 'f')
-			out->code_point = '\f';
+			*out_value = '\f';
 		if (cp.cp == 'n')
-			out->code_point = '\n';
+			*out_value = '\n';
 		if (cp.cp == 'r')
-			out->code_point = '\r';
+			*out_value = '\r';
 		if (cp.cp == 't')
-			out->code_point = '\t';
+			*out_value = '\t';
 		if (cp.cp == 'v')
-			out->code_point = '\v';
+			*out_value = '\v';
 		return ESUCCESS;
 	}
 
 	*out_esc_type = CHAR_CONST_ESCAPE_OCT;
 	if (is_oct_digit(cp.cp))
-		return lexer_lex_oct_escape_char(this, out);
+		return lexer_lex_oct_escape_char(this, out_value, out_lex_size);
 
 	*out_esc_type = CHAR_CONST_ESCAPE_HEX;
 	if (cp.cp == 'x' || cp.cp == 'u' || cp.cp == 'U') {
 		lexer_consume_code_point(this, &cp);	/* consume x/u/U */
-		out->lex_size += cp.cp_size;
+		if (out_lex_size)
+			*out_lex_size += cp.cp_size;
 		c32 = cp.cp;
 		err = lexer_peek_code_point(this, &cp);
 		if (err)
@@ -1150,16 +1166,17 @@ err_t lexer_lex_escape_char(struct lexer *this,
 		if (!is_hex_digit(cp.cp))
 			return EINVAL;
 		if (c32 == 'x')
-			return lexer_lex_hex_escape_char(this, out);
+			return lexer_lex_hex_escape_char(this, out_value, out_lex_size);
 		*out_esc_type = CHAR_CONST_ESCAPE_UCN_4;
 		if (c32 == 'u')
-			return lexer_lex_ucn_escape_char(this, 4, out);
+			return lexer_lex_ucn_escape_char(this, 4, out_value, out_lex_size);
 		assert(c32 == 'U');
 		*out_esc_type = CHAR_CONST_ESCAPE_UCN_8;
-		return lexer_lex_ucn_escape_char(this, 8, out);
+		return lexer_lex_ucn_escape_char(this, 8, out_value, out_lex_size);
 	}
 	return EINVAL;	/* Invalid escape */
 }
+#if 0
 /*****************************************************************************/
 /* For int-char-const:
  * If the char-const contains >1 chars, or if it contains a char,
@@ -1649,6 +1666,60 @@ err_t lexer_lex_char_const(struct lexer *this,
 	return lexer_token_store_code_point(out, cp.cp, NULL);
 }
 #endif
+/* Do not support multi-char consts */
+err_t lexer_token_evaluate_char_const(const struct lexer_token *this,
+									  char32_t *out)
+{
+	err_t err;
+	const char *src;
+	int src_len, index;
+	enum lexer_token_type type;
+	struct code_point cp;
+	struct lexer *lexer;
+	enum char_const_escape_type esc_type;
+
+	assert(lexer_token_source(this));
+	index = 1;	/* skip starting delimiter */
+	type = lexer_token_type(this);
+	if (type == LXR_TOKEN_UTF_8_CHAR_CONST)
+		index += 2;	/* skip u8 prefix */
+	if (type == LXR_TOKEN_UTF_16_CHAR_CONST ||
+		type == LXR_TOKEN_UTF_32_CHAR_CONST ||
+		type == LXR_TOKEN_WCHAR_T_CHAR_CONST)
+		index += 1;	/* skip u/U/L prefix */
+
+	/* The source is in src-char-set i.e. utf8-8. */
+	src = lexer_token_source(this);
+	src_len = (int)lexer_token_source_length(this);
+	src_len -= index;
+	src_len -= 1;	/* for the terminating delim */
+	err = lexer_new(NULL, &src[index], src_len, &lexer);
+	if (err)
+		return err;
+
+	err = lexer_peek_code_point(lexer, &cp);
+	if (err)
+		return err;
+
+	lexer_consume_code_point(lexer, &cp);
+	if (cp.cp != '\\') {
+		*out = cp.cp;
+		err = lexer_peek_code_point(lexer, &cp);
+		if (err != EOF)
+			return EINVAL;
+		return ESUCCESS;
+	}
+
+	err = lexer_lex_escape_char(lexer, &esc_type, &cp.cp, NULL);
+	if (err)
+		return err;
+	*out = cp.cp;
+	err = lexer_peek_code_point(lexer, &cp);
+	if (err != EOF)
+		return EINVAL;
+	return ESUCCESS;
+}
+
 /* The lexer pos is at teh start delimiter. */
 static
 err_t lexer_lex_char_const(struct lexer *this,
@@ -2208,6 +2279,7 @@ err_t lexer_lex_identifier(struct lexer *this,
 	const char *str;
 	err_t err;
 	struct code_point cp;
+	size_t lex_size;
 
 	is_start = true;
 	out->type = LXR_TOKEN_IDENTIFIER;
@@ -2230,19 +2302,15 @@ err_t lexer_lex_identifier(struct lexer *this,
 				return EINVAL;
 			lexer_consume_code_point(this, &cp);
 			out->lex_size += cp.cp_size;
+			lex_size = 0;
 			if (cp.cp == 'u')
-				err = lexer_lex_ucn_escape_char(this, 4, out);
+				err = lexer_lex_ucn_escape_char(this, 4, &cp.cp, &lex_size);
 			else
-				err = lexer_lex_ucn_escape_char(this, 8, out);
+				err = lexer_lex_ucn_escape_char(this, 8, &cp.cp, &lex_size);
 			if (err)
 				return err;
-			cp.cp = out->value;
+			out->lex_size += lex_size;
 			cp.cp_size = 0;
-			/*
-			 * Not acutally cp_size, but helps in the out->lex_size += ...
-			 * statement below. the lex_size was already incremented by
-			 * the ucn functions above.
-			 */
 		}
 		if (is_start && !is_xid_start(cp.cp))
 			return EINVAL;
@@ -2273,7 +2341,6 @@ err_t lexer_lex_back_slash(struct lexer *this,
 	err_t err;
 	struct code_point cp;
 	struct lexer_position save;
-	struct lexer_token token;
 
 	err = lexer_peek_code_point(this, &cp);
 	if (err)
@@ -2292,14 +2359,13 @@ err_t lexer_lex_back_slash(struct lexer *this,
 		return ESUCCESS;
 	lexer_consume_code_point(this, &cp);	/* consume u/U */
 
-	lexer_token_init(&token);
 	if (cp.cp == 'u')
-		err = lexer_lex_ucn_escape_char(this, 4, &token);
+		err = lexer_lex_ucn_escape_char(this, 4, &cp.cp, NULL);
 	else
-		err = lexer_lex_ucn_escape_char(this, 8, &token);
+		err = lexer_lex_ucn_escape_char(this, 8, &cp.cp, NULL);
 
 	/* If an err, or not the start of an identifier, then signal backslash */
-	if (err || !is_xid_start(token.value)) {
+	if (err || !is_xid_start(cp.cp)) {
 		this->position = save;
 		return ESUCCESS;
 	}

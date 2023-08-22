@@ -24,10 +24,18 @@ struct lexer_position {
 	off_t	file_col;
 };
 
+enum char_const_escape_type {
+	CHAR_CONST_ESCAPE_NONE,
+	CHAR_CONST_ESCAPE_SIMPLE,
+	CHAR_CONST_ESCAPE_HEX,
+	CHAR_CONST_ESCAPE_OCT,
+	CHAR_CONST_ESCAPE_UCN_4,
+	CHAR_CONST_ESCAPE_UCN_8,
+};
+
 /* The position of the token is separate property */
 struct lexer_token {
 	enum lexer_token_type	type;
-	char32_t value;	/* only for char-const */
 
 	size_t	lex_size;
 
@@ -129,15 +137,10 @@ bool lexer_token_is_char_const(const struct lexer_token *this)
 			type <= LXR_TOKEN_WCHAR_T_CHAR_CONST);
 }
 
-static inline
-char32_t lexer_token_char_const_value(const struct lexer_token *this)
-{
-	assert(lexer_token_is_char_const(this));
-	return this->value;
-}
-
 void	lexer_token_init(struct lexer_token *this);
 void	lexer_token_deref(struct lexer_token *this);
+err_t	lexer_token_evaluate_char_const(const struct lexer_token *this,
+										char32_t *out);
 /*****************************************************************************/
 struct lexer;
 err_t	lexer_new(const char *path,	/* Either path, or buffer, but not both */

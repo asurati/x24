@@ -1461,6 +1461,7 @@ err_t scanner_scan_directive_if(struct scanner *this,
 	struct queue tokens, exp_line;
 	struct cond_incl_stack_entry *entry;
 	struct queue *cistk;
+	char32_t cp;
 
 	/* There should be tokens */
 	if (queue_is_empty(line))
@@ -1567,11 +1568,18 @@ err_t scanner_scan_directive_if(struct scanner *this,
 		if (type == LXR_TOKEN_DEFINED)
 			return EINVAL;
 
-		num = 0;
-		if (cpp_token_is_char_const(token))
-			num = cpp_token_char_const_value(token);
-		else if (type == LXR_TOKEN_TRUE)
+		/* If this is a char-const, evaluate */
+		if (cpp_token_is_char_const(token)) {
+			err = lexer_token_evaluate_char_const(token->base, &cp);
+			if (err)
+				return err;
+			num = cp;
+		} else if (type == LXR_TOKEN_TRUE) {
 			num = 1;
+		} else {
+			num = 0;
+		}
+
 		has_white_space = cpp_token_has_white_space(token);
 		is_first = cpp_token_is_first(token);
 		cpp_token_delete(token);
