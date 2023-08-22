@@ -875,10 +875,14 @@ err_t scanner_scan_directive_define(struct scanner *this,
 		return err;
 
 	err = scanner_check_macro_redefine(this, macro);
-	if (!err)
-		return err;	/* Equal to another macro */
-	if (err != ENOENT)
-		return err;	/* incompatible with another macro of same name. */
+	if (!err || err != ENOENT) {
+		/*
+		 * Equal to another macro, or incompatible with another macro of same
+		 * name. Free in both cases */
+		macro_delete(macro);
+		return err;
+	}
+	assert(err == ENOENT);
 	return array_add_entry(&this->macros, macro);
 }
 /*****************************************************************************/
