@@ -117,7 +117,7 @@ struct queue {
 #define queue_for_each_rev(q, ix, entry)	\
 	for (ix = queue_num_entries(q) - 1;	\
 		 entry = ix >= 0 ? queue_peek_entry(q, ix) : NULL, ix >= 0;	\
-		 ++ix)
+		 --ix)
 
 #define queue_for_each_with_rem_rev(q, entry)	\
 	while (entry = queue_is_empty(q) ? NULL : queue_remove_tail(q), entry)
