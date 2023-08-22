@@ -957,6 +957,7 @@ void lexer_skip_multi_line_comment(struct lexer *this)
 	}
 }
 /*****************************************************************************/
+/* Starting at the hex-digit after u/U */
 static
 err_t lexer_lex_ucn_escape_char(struct lexer *this,
 								const int num_digits,
@@ -1912,7 +1913,6 @@ err_t lexer_lex_single_char(struct lexer *this,
 	case '~': out->type = LXR_TOKEN_TILDE;			break;
 	case ',': out->type = LXR_TOKEN_COMMA;			break;
 	case '@': out->type = LXR_TOKEN_AT;				break;
-	case '\\': out->type = LXR_TOKEN_BACK_SLASH;	break;
 	default: return EINVAL;
 	}
 	return ESUCCESS;
@@ -2115,34 +2115,32 @@ err_t lexer_lex_identifier(struct lexer *this,
 						   struct lexer_token *out)
 {
 	int i;
+	bool is_start;
 	const char *str;
 	err_t err;
 	struct code_point cp;
 
-	/* Read the xid_start */
-	err =  lexer_peek_code_point(this, &cp);
-	if (err)
-		return err;
-	assert(is_xid_start(cp.cp));
-	lexer_consume_code_point(this, &cp);
+	is_start = true;
 	out->type = LXR_TOKEN_IDENTIFIER;
-	out->lex_size += cp.cp_size;
-
 	while (true) {
 		err = lexer_peek_code_point(this, &cp);
-		if (err == EOF) {	/* EOF is allowed */
-			err = ESUCCESS;
+		if (err == EOF) {
+			if (!is_start)
+				err = ESUCCESS;
 			break;
 		}
 		if (err)
 			return err;
 		if (cp.cp == '\\') {
 			lexer_consume_code_point(this, &cp);
+			out->lex_size += cp.cp_size;
 			err = lexer_peek_code_point(this, &cp);
 			if (err)
 				return err;
 			if (cp.cp != 'u' && cp.cp != 'U')
 				return EINVAL;
+			lexer_consume_code_point(this, &cp);
+			out->lex_size += cp.cp_size;
 			if (cp.cp == 'u')
 				err = lexer_lex_ucn_escape_char(this, 4, out);
 			else
@@ -2157,10 +2155,13 @@ err_t lexer_lex_identifier(struct lexer *this,
 			 * the ucn functions above.
 			 */
 		}
-		if (!is_xid_continue(cp.cp))
+		if (is_start && !is_xid_start(cp.cp))
+			return EINVAL;
+		if (!is_start && !is_xid_continue(cp.cp))
 			break;
 		out->lex_size += cp.cp_size;
 		lexer_consume_code_point(this, &cp);
+		is_start = false;
 	}
 	out->type = LXR_TOKEN_IDENTIFIER;
 	str = this->buffer + this->begin.lex_pos;
@@ -2174,6 +2175,51 @@ err_t lexer_lex_identifier(struct lexer *this,
 		return ESUCCESS;
 	}
 	return ESUCCESS;
+}
+/*****************************************************************************/
+static
+err_t lexer_lex_back_slash(struct lexer *this,
+						   struct lexer_token *out)
+{
+	err_t err;
+	struct code_point cp;
+	struct lexer_position save;
+	struct lexer_token token;
+
+	err = lexer_peek_code_point(this, &cp);
+	if (err)
+		return err;
+	lexer_consume_code_point(this, &cp);	/* consume backslash */
+	out->type = LXR_TOKEN_BACK_SLASH;
+	out->lex_size += cp.cp_size;
+	save = this->position;	/* save, in case we need to rewind */
+
+	/*
+	 * If a u or U follows, a code-point is successfully scanned, then this
+	 * is the start of an identfier.
+	 */
+	err = lexer_peek_code_point(this, &cp);
+	if (err || (cp.cp != 'u' && cp.cp != 'U'))
+		return ESUCCESS;
+	lexer_consume_code_point(this, &cp);	/* consume u/U */
+
+	lexer_token_init(&token);
+	if (cp.cp == 'u')
+		err = lexer_lex_ucn_escape_char(this, 4, &token);
+	else
+		err = lexer_lex_ucn_escape_char(this, 8, &token);
+
+	/* If an err, or not the start of an identifier, then signal backslash */
+	if (err || !is_xid_start(token.value)) {
+		this->position = save;
+		return ESUCCESS;
+	}
+
+	/* Else, this is the start of an identifier. Reset the token. */
+	out->type = LXR_TOKEN_INVALID;
+	out->lex_size = 0;
+	this->position = this->begin;
+	return lexer_lex_identifier(this, out);
 }
 /*****************************************************************************/
 static
@@ -2375,6 +2421,8 @@ err_t _lexer_lex_token(struct lexer *this,
 	else if (cp.cp == '\"')
 		err = lexer_lex_string_literal(this, out);
 #endif
+	else if (cp.cp == '\\')
+		err = lexer_lex_back_slash(this, out);
 	else if (is_xid_start(cp.cp))
 		err = lexer_lex_identifier(this, out);
 	else if (is_dec_digit(cp.cp))
