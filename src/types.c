@@ -98,19 +98,45 @@ err_t array_add_entry(struct array *this,
 static
 err_t queue_realloc(struct queue *this)
 {
-	int num_entries_allocated, i;
+	int num_entries_allocated, i, num_allocate;
 	size_t size;
 
+	/* first time alloc */
+	if (this->read < 0) {
+		assert(this->num_entries_allocated == 0);
+		assert(this->num_entries == 0);
+		assert(this->entries == NULL);
+		this->read = 0;
+	}
+	assert(this->read >= 0);
+	/*
+	 * a state such as read == 32, num_entries == 80 and
+	 * num_entries_allocated == 80 can be reached. We must. Here, there are
+	 * 32 objects, indices [0, 31] that are moved by the original loop
+	 * below that ran from 0 to this->read. But the allocation only
+	 * increases by 16, not by 32, causing write beyond boundaries, heap
+	 * overflow. Hence, we must only move the max of
+	 * (this->read, 16).
+	 *
+	 * But this won't work if we are trying to add to the head of the
+	 * queue, i.e. to index r-1. In that case the we must allocate
+	 * this->read, and not just 16.
+	 *
+	 * align_up this->read to the next multiple of 16.
+	 * (read + 0xf) & (~0xf)
+	 * So we allcate max(((this->read + 15) & ~15), 16)
+	 */
+	num_allocate = (this->read - 0) + 0xf;
+	num_allocate &= ~0xf;
+	if (num_allocate == 0)
+		num_allocate = 16;
+
 	num_entries_allocated = this->num_entries_allocated;	/* save */
-	this->num_entries_allocated += 16;
+	this->num_entries_allocated += num_allocate;
 	size = this->num_entries_allocated * sizeof(void *);
 	this->entries = realloc(this->entries, size);
 	if (this->entries == NULL)
 		return ENOMEM;
-
-	/* first time alloc */
-	if (this->read < 0)
-		this->read = 0;
 
 	/* Move the pointers [0, r-1] to [prev-nia, prev-nia + r - 1] */
 	for (i = 0; i < this->read; ++i)

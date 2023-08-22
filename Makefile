@@ -75,11 +75,6 @@ INC := -I$(SRC_PATH)
 
 ARFLAGS += --thin -r -cvsP
 
-# ASAN:
-# CFLAGS += -fno-omit-frame-pointer -fno-optimize-sibling-calls
-# CFLAGS += -fsanitize=address
-# Build: add to $(CC) link/build cmd -fsanitize=address -static-libsan
-
 # c11 for uchar.h
 XFLAGS += $(INC) -std=c11 -MMD -MP
 CPPFLAGS += -P -x assembler-with-cpp $(XFLAGS)
@@ -87,6 +82,11 @@ CFLAGS += -c -O0 -g -pedantic-errors $(XFLAGS) -Werror -Wfatal-errors
 CFLAGS += -Wall -Wextra -Wshadow -Wpedantic -Wcast-align
 CFLAGS += -fno-common -fno-exceptions -fno-unwind-tables
 CFLAGS += -fno-asynchronous-unwind-tables -fsigned-char
+
+# ASAN:
+# CFLAGS += -fno-omit-frame-pointer -fno-optimize-sibling-calls
+# CFLAGS += -fsanitize=address
+# Build/Link:	$(CC) $^ -fsanitize=address -static-libsan -o $@
 
 # These exports are needed by the BUILD command.
 export CC CPP AR CFLAGS CPPFLAGS ARFLAGS BIN_AR

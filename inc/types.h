@@ -176,7 +176,7 @@ void *queue_peek_tail(const struct queue *this)
 	return queue_peek_entry(this, this->num_entries - 1);
 }
 
-/* Do not delete this. queue must be empty */
+/* Do not delete 'this'. queue must be empty */
 static inline
 void queue_delete(struct queue *this)
 {
