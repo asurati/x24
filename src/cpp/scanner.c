@@ -1996,36 +1996,25 @@ err_t cpp_tokens_stringize(const struct queue *this,
 	int i, len, j, k, src_len;
 	const char *src;
 	char *str;
-	struct lexer_token *base;
+	struct cpp_token_stream stream;
+	struct lexer *lexer;
 	struct cpp_token *token;
 	const struct cpp_token *t;
 
-	base = malloc(sizeof(*base));
-	if (base == NULL)
-		return ENOMEM;
-
-	lexer_token_init(base);	/* ref-count is 1 */
-	base->type = LXR_TOKEN_CHAR_STRING_LITERAL;
-
-	err = cpp_token_new(base, &token);
-	if (err)
-		return err;
-	token->has_white_space = has_white_space;
-	token->is_first = is_first;
-
 	/* Empty string */
 	if (this == NULL || queue_is_empty(this)) {
-		str = malloc(3);
+		str = malloc(4);
 		if (str == NULL)
 			return ENOMEM;
 		str[0] = str[1] = '\"';
-		str[2] = NULL_CHAR;
-		len = 2;
-		goto done;
+		str[2] = '\n';
+		str[3] = NULL_CHAR;
+		len = 3;
+		goto build;
 	}
 	assert(!queue_is_empty(this));
 
-	len = 2;	/* for the dbl quotes */
+	len = 3;	/* for the dbl quotes + nl*/
 	queue_for_each(this, i, t) {
 		/* We may have to remove placemarkers */
 		assert(cpp_token_type(t) != LXR_TOKEN_PLACE_MARKER);
@@ -2042,10 +2031,11 @@ err_t cpp_tokens_stringize(const struct queue *this,
 			++len;
 		}
 	}
-
 	str = malloc(len + 1);
 	if (str == NULL)
 		return ENOMEM;
+	str[len - 1] = '\n';
+	str[len] = NULL_CHAR;
 
 	k = 0;
 	str[k++] = '\"';
@@ -2064,11 +2054,19 @@ err_t cpp_tokens_stringize(const struct queue *this,
 		}
 	}
 	str[k++] = '\"';
-	assert(k == len);
-	str[k++] = NULL_CHAR;
-done:
-	base->source = base->resolved = str;
-	base->source_len = base->resolved_len = base->lex_size = len;
+	assert(k == len - 1);
+build:
+	err = lexer_new(NULL, str, len, &lexer);
+	if (err)
+		return err;
+	cpp_token_stream_init(&stream, lexer);
+	err = cpp_token_stream_remove_head(&stream, &token);
+	if (err)
+		return err;
+	assert(cpp_token_is_string_literal(token));
+	assert(cpp_token_type(token) == LXR_TOKEN_CHAR_STRING_LITERAL);
+	token->has_white_space = has_white_space;
+	token->is_first = is_first;
 	*out = token;
 	return err;
 }
@@ -3363,7 +3361,6 @@ err_t scanner_scan_file(struct scanner *this,
 		cpp_token_delete(prev);
 #endif
 	}
-
 	printf("%s[%d]: %s ends with %d\n", __func__, depth, path, err);
 err1:
 	lexer_delete(lexer);
