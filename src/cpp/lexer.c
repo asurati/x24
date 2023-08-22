@@ -2540,7 +2540,7 @@ err_t _lexer_lex_token(struct lexer *this,
 		cp.cp == '[' || cp.cp == ']' ||
 		cp.cp == '{' || cp.cp == '}' ||
 		cp.cp == '?' || cp.cp == ';' ||	cp.cp == '~' ||	cp.cp == ',' ||
-		cp.cp == '@' || cp.cp == '\\' )
+		cp.cp == '@')
 		err = lexer_lex_single_char(this, out);
 	else if (cp.cp == '#')
 		err = lexer_lex_hash(this, out);
