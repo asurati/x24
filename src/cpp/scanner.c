@@ -141,6 +141,16 @@ const struct macro *scanner_find_macro(const struct scanner *this,
 	return array_peek_entry(&this->macros, i);
 }
 /*****************************************************************************/
+/* During deletion, take care to not free static mem */
+static
+void cpp_token_delete(void *p)
+{
+	struct cpp_token *this = p;
+	lexer_token_deref(this->base);
+	free(this);
+}
+
+/* Do not incr. ref-count on base here */
 static
 err_t cpp_token_new(struct lexer_token *base,
 					struct cpp_token **out)
@@ -151,8 +161,7 @@ err_t cpp_token_new(struct lexer_token *base,
 	if (this == NULL)
 		return ENOMEM;
 
-	lexer_token_ref(base);	/* On copy, incr. the ref-count */
-	this->base = base;
+	this->base = base;	/* Move lexer's ref-count into token */
 	this->is_marked = false;
 	this->is_first = base->is_first;
 	this->has_white_space = base->has_white_space;
@@ -170,6 +179,7 @@ err_t cpp_token_copy(struct cpp_token *this,
 	err = cpp_token_new(this->base, &token);
 	if (err)
 		return err;
+	lexer_token_ref(this->base);	/* On copy, incr. the ref-count */
 	token->is_marked = this->is_marked;
 	token->is_first = this->is_first;
 	token->has_white_space = this->has_white_space;
@@ -190,9 +200,8 @@ err_t cpp_token_new_number(const int num,
 
 	assert(num == 1 || num == 0);	/* For now */
 
-	/* the ref-count here is 0. It incr to 1 in cpp_token_new */
 	base = malloc(sizeof(*base));
-	lexer_token_init(base);
+	lexer_token_init(base);	/* ref-count is 1 */
 
 	str = malloc(2);
 	if (str == NULL)
@@ -224,11 +233,11 @@ err_t cpp_token_new_place_marker(const bool has_white_space,
 	base = malloc(sizeof(*base));
 	if (base == NULL)
 		return ENOMEM;
-	lexer_token_init(base);	/* ref-count == 0 */
+	lexer_token_init(base);	/* ref-count == 1 */
 	base->type = LXR_TOKEN_PLACE_MARKER;
 	base->has_white_space = has_white_space;
 	base->is_first = is_first;
-	return cpp_token_new(base, out);	/* ref-count == 1 */
+	return cpp_token_new(base, out);
 }
 /*****************************************************************************/
 /* out init by the caller */
@@ -277,15 +286,6 @@ err_t cpp_tokens_remove_place_markers(struct queue *this)
 	return queue_move(&out, this);
 }
 /*****************************************************************************/
-/* During deletion, take care to not free static mem */
-static
-void cpp_token_delete(void *p)
-{
-	struct cpp_token *this = p;
-	lexer_token_deref(this->base);
-	free(this);
-}
-
 /* no ref change on base when token is placed/removed from queues, etc. */
 static
 err_t cpp_token_stream_peek_head(struct cpp_token_stream *this,
@@ -306,11 +306,9 @@ err_t cpp_token_stream_peek_head(struct cpp_token_stream *this,
 	if (lexer == NULL)
 		return EOF;
 
-	err = lexer_lex_token(this->lexer, &base);
+	err = lexer_lex_token(lexer, &base);	/* ref-count is 1 */
 	if (!err)
-		err = cpp_token_new(base, &token);	/* incrs. ref on base */
-	if (!err)
-		lexer_token_deref(base);	/* Drop lexer's ref on base */
+		err = cpp_token_new(base, &token);	/* move lexer's ref */
 	if (!err)
 		err = queue_add_tail(&this->tokens, token);
 	if (!err)
@@ -329,7 +327,6 @@ err_t cpp_token_stream_remove_head(struct cpp_token_stream *this,
 	return err;
 }
 /*****************************************************************************/
-
 static
 void macro_delete(void *p)
 {
@@ -1986,10 +1983,10 @@ err_t cpp_tokens_stringize(const struct queue *this,
 	if (base == NULL)
 		return ENOMEM;
 
-	lexer_token_init(base);	/* ref-count is 0 */
+	lexer_token_init(base);	/* ref-count is 1 */
 	base->type = LXR_TOKEN_CHAR_STRING_LITERAL;
 
-	err = cpp_token_new(base, &token);	/* incrs. ref-count to 1 */
+	err = cpp_token_new(base, &token);
 	if (err)
 		return err;
 	token->has_white_space = has_white_space;
@@ -3383,7 +3380,6 @@ err_t scanner_scan_predefined_macros(struct scanner *this)
 #if 0
 		"#define __STDC_ISO_10646__ 202012L\n"
 #endif
-
 		/* These declarations to allow parsing GNU headers. */
 		"#define __x86_64__ 1\n";
 
