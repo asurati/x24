@@ -567,10 +567,10 @@ err_t code_point_to_utf16(const char32_t this,
 }
 #endif
 /*****************************************************************************/
-
 void lexer_token_init(struct lexer_token *this)
 {
 	memset(this, 0, sizeof(*this));
+	this->ref_count = 1;
 }
 #if 0
 void lexer_token_print_string(const struct lexer_token *this)
@@ -1707,6 +1707,7 @@ err_t lexer_token_evaluate_char_const(const struct lexer_token *this,
 		err = lexer_peek_code_point(lexer, &cp);
 		if (err != EOF)
 			return EINVAL;
+		free(lexer);
 		return ESUCCESS;
 	}
 
@@ -1717,6 +1718,7 @@ err_t lexer_token_evaluate_char_const(const struct lexer_token *this,
 	err = lexer_peek_code_point(lexer, &cp);
 	if (err != EOF)
 		return EINVAL;
+	free(lexer);
 	return ESUCCESS;
 }
 
@@ -2663,6 +2665,7 @@ bool lexer_skip_white_spaces(struct lexer *this,
 err_t lexer_lex_token(struct lexer *this,
 					  struct lexer_token **out)
 {
+	err_t err;
 	int num_white_spaces;
 	struct lexer_token *token;
 
@@ -2672,10 +2675,12 @@ err_t lexer_lex_token(struct lexer *this,
 
 	*out = token;
 	lexer_token_init(token);
-	lexer_token_ref(token);	/* lexer's ref count */
 	token->is_first = lexer_skip_white_spaces(this, &num_white_spaces);
 	/* we change >1 spaces to 1. This may affect #include paths. */
 	token->has_white_space = num_white_spaces ? 1 : 0;
 	this->begin = this->position;
-	return _lexer_lex_token(this, token);
+	err = _lexer_lex_token(this, token);
+	if (err)
+		lexer_token_deref(token);
+	return err;
 }
