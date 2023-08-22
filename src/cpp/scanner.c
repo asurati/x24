@@ -893,12 +893,28 @@ err_t rpn_stack_evaluate(struct queue *this,
 	err_t err;
 	bool empty;
 	int num_question_marks;
-	bool signs[2];	/* false == +ve, true == -ve */
-	uintmax_t values[2];
+	bool sign[2];	/* false == +ve, true == -ve */
+	uintmax_t value[2];
 	struct queue result, stk;
 	struct rpn_stack_entry *entry;
-	struct rpn_stack_entry *operands[2];
+	struct rpn_stack_entry *operand[2];
 	enum lexer_token_type operator;
+
+	/*
+	 * Reverse the stack so that we can use stack routines.
+	 * a > b is represented as: 'a b > top'.
+	 * But the processing of rpn starts at the bottom of this representation.
+	 * So, reverse the stack.
+	 */
+	stack_init(&stk);
+	queue_for_each_with_rem_rev(this, entry) {
+		err = stack_push(&stk, entry);
+		if (err)
+			return err;
+	}
+	assert(queue_is_empty(this));
+	*this = stk;
+	stack_init(&stk);
 
 	/* Default is false/0 */
 	out->type = RPN_STACK_ENTRY_UNSIGNED;
@@ -918,26 +934,26 @@ err_t rpn_stack_evaluate(struct queue *this,
 		}
 
 		operator = entry->u.operator;
-		free(entry);	/* entry no longer needed */
+		free(entry);	/* operator entry no longer needed */
 
 		assert(!stack_is_empty(&result));
-		operands[1] = stack_pop(&result);
-		values[1] = operands[1]->u.value;
-		signs[1] = rpn_stack_entry_sign(operands[1]);
+		operand[1] = stack_pop(&result);
+		value[1] = operand[1]->u.value;
+		sign[1] = rpn_stack_entry_sign(operand[1]);
 
 		/* unary op? */
 		switch (operator) {
 		case LXR_TOKEN_UNARY_MINUS:
-			values[1] = -(intmax_t)values[1];
-			operands[1]->type = RPN_STACK_ENTRY_SIGNED;
+			value[1] = -(intmax_t)value[1];
+			operand[1]->type = RPN_STACK_ENTRY_SIGNED;
 			break;
 		case LXR_TOKEN_EXCLAMATION_MARK:
-			values[1] = !values[1];
-			operands[1]->type = RPN_STACK_ENTRY_UNSIGNED;
+			value[1] = !value[1];
+			operand[1]->type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_TILDE:
-			values[1] = ~values[1];
-			operands[1]->type = RPN_STACK_ENTRY_SIGNED;
+			value[1] = ~value[1];
+			operand[1]->type = RPN_STACK_ENTRY_SIGNED;
 			break;
 		default:
 			break;
@@ -947,8 +963,8 @@ err_t rpn_stack_evaluate(struct queue *this,
 		case LXR_TOKEN_UNARY_MINUS:
 		case LXR_TOKEN_EXCLAMATION_MARK:
 		case LXR_TOKEN_TILDE:
-			operands[1]->u.value = values[1];
-			err = stack_push(&result, operands[1]);
+			operand[1]->u.value = value[1];
+			err = stack_push(&result, operand[1]);
 			if (err)
 				return err;
 			continue;
@@ -957,9 +973,9 @@ err_t rpn_stack_evaluate(struct queue *this,
 		}
 
 		assert(!stack_is_empty(&result));
-		operands[0] = stack_pop(&result);
-		values[0] = operands[0]->u.value;
-		signs[0] = rpn_stack_entry_sign(operands[0]);
+		operand[0] = stack_pop(&result);
+		value[0] = operand[0]->u.value;
+		sign[0] = rpn_stack_entry_sign(operand[0]);
 
 		if (operator == LXR_TOKEN_QUESTION_MARK) {
 			num_question_marks = 1;
@@ -969,25 +985,23 @@ err_t rpn_stack_evaluate(struct queue *this,
 			 * op[1] is false.
 			 */
 			empty = false;
-			if (values[0]) {
+			if (value[0]) {
 				/* intiial cond is true. result is op[1], and free the rest */
-				free(operands[0]);
-				operands[0] = operands[1];
+				free(operand[0]);
+				operand[0] = operand[1];
 				empty = true;	/* empty the false part of the conditional */
 			} else {
 				/* initial cond is false. free op[1], and eval the rest */
-				free(operands[1]);
+				free(operand[1]);
 			}
 
 			/* Create a sub-stack, until the corresponding : */
-			stack_init(&stk);
 			while (!stack_is_empty(this)) {
-				entry = stack_pop(this);
+				entry = stack_peek(this);
 				if (entry->u.operator == LXR_TOKEN_COLON &&
-					num_question_marks == 1) {
-					free(entry);
+					num_question_marks == 1)
 					break;
-				}
+				stack_pop(this);
 				if (entry->u.operator == LXR_TOKEN_QUESTION_MARK)
 					++num_question_marks;
 				else if (entry->u.operator == LXR_TOKEN_COLON)
@@ -999,47 +1013,47 @@ err_t rpn_stack_evaluate(struct queue *this,
 				err = stack_push(&stk, entry);
 				if (err)
 					return err;
-				continue;
 			}
 			if (stack_is_empty(this))
 				return EINVAL;
+			free(stack_pop(this));	/* free the corresponding colon */
 
-			err = ESUCCESS;
 			if (!empty)	/* evaluate the false part of the ?: conditional */
-				err = rpn_stack_evaluate(&stk, operands[0]);
+				err = rpn_stack_evaluate(&stk, operand[0]);
 			if (!err)
-				err = stack_push(&result, operands[0]);
+				err = stack_push(&result, operand[0]);
 			if (err)
 				return err;
 			assert(stack_is_empty(&stk));
 			continue;
 		}
 
+		free(operand[1]);	/* no longer needed */
 		switch (operator) {
 		case LXR_TOKEN_LOGICAL_OR:
-			values[0] = values[0] || values[1];
-			operands[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+			value[0] = value[0] || value[1];
+			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_LOGICAL_AND:
-			values[0] = values[0] && values[1];
-			operands[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+			value[0] = value[0] && value[1];
+			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_BITWISE_OR:
-			values[0] = values[0] | values[1];
+			value[0] = value[0] | value[1];
 			break;
 		case LXR_TOKEN_BITWISE_XOR:
-			values[0] = values[0] ^ values[1];
+			value[0] = value[0] ^ value[1];
 			break;
 		case LXR_TOKEN_BITWISE_AND:
-			values[0] = values[0] & values[1];
+			value[0] = value[0] & value[1];
 			break;
 		case LXR_TOKEN_EQUALS:
-			values[0] = values[0] == values[1];
-			operands[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+			value[0] = value[0] == value[1];
+			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_NOT_EQUALS:
-			values[0] = values[0] != values[1];
-			operands[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+			value[0] = value[0] != value[1];
+			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_LESS_THAN:
 			/*
@@ -1049,83 +1063,83 @@ err_t rpn_stack_evaluate(struct queue *this,
 			 * then usual.
 			 * if one of them is -ve, then usual.
 			 */
-			if (signs[0] == signs[1])
-				values[0] = values[0] < values[1];
-			else if (signs[0])	/* -ve < +ve is true */
-				values[0] = 1;
+			if (sign[0] == sign[1])
+				value[0] = value[0] < value[1];
+			else if (sign[0])	/* -ve < +ve is true */
+				value[0] = 1;
 			else
-				values[0] = 0;	/* +ve < -ve is false */
-			operands[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+				value[0] = 0;	/* +ve < -ve is false */
+			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_LESS_THAN_EQUALS:
-			if (signs[0] == signs[1])
-				values[0] = values[0] <= values[1];
-			else if (signs[0])	/* -ve <= +ve is true */
-				values[0] = 1;
+			if (sign[0] == sign[1])
+				value[0] = value[0] <= value[1];
+			else if (sign[0])	/* -ve <= +ve is true */
+				value[0] = 1;
 			else
-				values[0] = 0;	/* +ve <= -ve is false */
-			operands[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+				value[0] = 0;	/* +ve <= -ve is false */
+			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_GREATER_THAN:
-			if (signs[0] == signs[1])
-				values[0] = values[0] > values[1];
-			else if (signs[0])	/* -ve > +ve is false */
-				values[0] = 0;
+			if (sign[0] == sign[1])
+				value[0] = value[0] > value[1];
+			else if (sign[0])	/* -ve > +ve is false */
+				value[0] = 0;
 			else
-				values[0] = 1;	/* +ve > -ve is true */
-			operands[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+				value[0] = 1;	/* +ve > -ve is true */
+			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_GREATER_THAN_EQUALS:
-			if (signs[0] == signs[1])
-				values[0] = values[0] >= values[1];
-			else if (signs[0])	/* -ve >= +ve is false */
-				values[0] = 0;
+			if (sign[0] == sign[1])
+				value[0] = value[0] >= value[1];
+			else if (sign[0])	/* -ve >= +ve is false */
+				value[0] = 0;
 			else
-				values[0] = 1;	/* +ve >= -ve is true */
-			operands[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+				value[0] = 1;	/* +ve >= -ve is true */
+			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_SHIFT_LEFT:
-			if (values[1] > 63)
-				values[0] = 0;
-			values[0] <<= values[1];	/* signed may conver to unsinged */
+			if (value[1] > 63)
+				value[0] = 0;
+			value[0] <<= value[1];	/* signed may conver to unsinged */
 			break;
 		case LXR_TOKEN_SHIFT_RIGHT:
-			if (values[1] > 63) {
-				values[0] = 0;
-				if (signs[0])
-					values[0] = (uintmax_t)-1;
+			if (value[1] > 63) {
+				value[0] = 0;
+				if (sign[0])
+					value[0] = (uintmax_t)-1;
 				break;
 			}
-			if (signs[0])
-				values[0] = (uintmax_t)((intmax_t)values[0] >> values[1]);
+			if (sign[0])
+				value[0] = (uintmax_t)((intmax_t)value[0] >> value[1]);
 			else
-				values[0] >>= values[1];
+				value[0] >>= value[1];
 			break;
 		case LXR_TOKEN_PLUS:
-			values[0] += values[1];
+			value[0] += value[1];
 			break;
 		case LXR_TOKEN_MINUS:
-			values[0] -= values[1];
+			value[0] -= value[1];
 			break;
 		case LXR_TOKEN_MUL:
-			values[0] *= values[1];
+			value[0] *= value[1];
 			break;
 		case LXR_TOKEN_DIV:
-			if (values[1] == 0)
+			if (value[1] == 0)
 				return EINVAL;
-			values[0] /= values[1];
+			value[0] /= value[1];
 			break;
 		case LXR_TOKEN_MOD:
-			if (values[1] == 0)
+			if (value[1] == 0)
 				return EINVAL;
-			values[0] %= values[1];
+			value[0] %= value[1];
 			break;
 		default:
 			assert(0);
 			return EINVAL;
 		}	/* switch */
-		operands[0]->u.value = values[0];
-		err = stack_push(&result, operands[0]);
+		operand[0]->u.value = value[0];
+		err = stack_push(&result, operand[0]);
 		if (err)
 			return err;
 	}	/* for */
@@ -1253,12 +1267,11 @@ err_t cpp_tokens_to_rpn(struct queue *this,
 	struct queue op_stk;
 	struct rpn_stack_entry *entry;
 
-#if 0
-	list_for_each(&this->tokens, e) {
-		token = le_to_cpp_token(e);
-		for (i = 0; i < cpp_token_num_prev_white_spaces(token); ++i)
+#if 1
+	queue_for_each(this, i, token) {
+		if (cpp_token_has_white_space(token))
 			printf(" ");
-		lexer_token_print_string(token->base);
+		printf("%s", cpp_token_source(token));
 	}
 	printf("\n");
 #endif
@@ -1357,12 +1370,12 @@ err_t cpp_tokens_to_rpn(struct queue *this,
 		}
 
 		/* first 3 are unary ops */
-		for (i = 3; i < 24; ++i) {
+		for (i = 3; i < (int)ARRAY_SIZE(g_rpn_operator_precedence); ++i) {
 			if (operator == g_rpn_operator_precedence[i].operator)
 				break;
 		}
 		/* invalid binary op */
-		if (i == 24)
+		if (i == (int)ARRAY_SIZE(g_rpn_operator_precedence))
 			return EINVAL;
 		/* The colon for question-mark is expected when in state 1 */
 		if (operator == LXR_TOKEN_QUESTION_MARK) {
@@ -1395,33 +1408,19 @@ err_t cpp_tokens_evaluate_expression(struct queue *this,
 									 int *out)
 {
 	err_t err;
-	int i;
-	struct queue stk[2];
-	struct rpn_stack_entry *entry, result;
+	struct queue stk;
+	struct rpn_stack_entry result;
 
-	stack_init(&stk[0]);
-	stack_init(&stk[1]);
-	err = cpp_tokens_to_rpn(this, &stk[0]);
+	stack_init(&stk);
+	err = cpp_tokens_to_rpn(this, &stk);
 	if (err)
 		return err;
 	assert(queue_is_empty(this));
-	assert(!stack_is_empty(&stk[0]));
-
-	/* Reverse the stack so that we can use stack routines */
-	queue_for_each_rev(&stk[0], i, entry) {
-		err = stack_push(&stk[1], entry);
-		if (err)
-			return err;
-	}
-	/*
-	 * The entries from stk[0] have been moved into stk[1]. After freeing
-	 * stk[0].entries, do not touch stk[0].
-	 */
-	free(stk[0].entries);
-	err = rpn_stack_evaluate(&stk[1], &result);
+	assert(!stack_is_empty(&stk));
+	err = rpn_stack_evaluate(&stk, &result);
 	if (err)
 		return err;
-	assert(stack_is_empty(&stk[1]));
+	assert(stack_is_empty(&stk));
 	assert(result.type != RPN_STACK_ENTRY_OPERATOR);
 	*out = result.u.value ? 1 : 0;
 	return err;
