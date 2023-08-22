@@ -473,6 +473,7 @@ same_resolved:
 	for (i = 0; i < size;) {
 		/* only attempt to read more cps if size is non-zero. */
 		err = lexer_peek_code_point(this, &cp);
+		assert(err == ESUCCESS);
 		if (err)
 			goto err0;
 
@@ -501,7 +502,6 @@ same_resolved:
 	if (!has_esc_seq) {
 		token->resolved = token->source;
 		token->resolved_len = token->source_len;
-		goto err0;
 	}
 	/* fall-thru */
 err0:
