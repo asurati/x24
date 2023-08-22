@@ -77,6 +77,12 @@ const char *lexer_token_resolved(const struct lexer_token *this)
 }
 
 static inline
+int lexer_token_lex_size(const struct lexer_token *this)
+{
+	return this->lex_size;
+}
+
+static inline
 int lexer_token_resolved_length(const struct lexer_token *this)
 {
 	return this->resolved_len;

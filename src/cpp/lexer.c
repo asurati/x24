@@ -431,10 +431,13 @@ err_t lexer_build_source(struct lexer *this,
 		goto same_resolved;
 	}
 
+	if (lexer_token_is_char_const(token) ||
+		lexer_token_is_string_literal(token))
+		goto same_resolved;	/* fall-thru with source == NULL */
+
 	switch (type) {
-	case LXR_TOKEN_NUMBER:break;	/* fall-thru */
-	case LXR_TOKEN_IDENTIFIER:break;	/* fall-thru */
-	case LXR_TOKEN_HASH:token->source = "#";break;
+	case LXR_TOKEN_NUMBER:break;	/* fall-thru with source == NULL */
+	case LXR_TOKEN_IDENTIFIER:break;	/* fall-thru with source == NULL */
 	default:assert(0);
 	}
 same_resolved:
@@ -445,8 +448,11 @@ same_resolved:
 		return ESUCCESS;
 	}
 
+	/* Only number and token_identifier for now */
 	assert(type == LXR_TOKEN_NUMBER ||
-		   type == LXR_TOKEN_IDENTIFIER);
+		   type == LXR_TOKEN_IDENTIFIER ||
+		   lexer_token_is_char_const(token) ||
+		   lexer_token_is_string_literal(token));
 
 	/* These must be rescanned */
 	/* Rewind back to the start and rescan the cps */
@@ -479,10 +485,18 @@ same_resolved:
 	}
 	token->source = string;
 	assert(has_esc_seq == false);	/* TODO */
+
+	/* Don't resolve string-literal and char-const at this time */
+	if (lexer_token_is_string_literal(token) ||
+		lexer_token_is_char_const(token))
+		goto err0;
+
 	if (!has_esc_seq) {
 		token->resolved = token->source;
 		token->resolved_len = token->source_len = token->lex_size;
+		goto err0;
 	}
+
 	/* fall-thru */
 err0:
 	this->position = save;
@@ -578,9 +592,14 @@ void lexer_token_print(const struct lexer_token *this,
 					   const char *msg)
 {
 	const char *type = g_lexer_token_type_strs[this->type];
-	printf("%s: pos %ld, file (%ld,%ld), ws? %d, 1st? %d, %s: '%s'",
+	/*
+	 * p for lexer-position.
+	 * f for file-position.
+	 */
+	printf("%s: p(%ld,%2d), f(%ld,%ld), ws? %d, 1st? %d, %s: '%s'",
 		   msg,
 		   begin->lex_pos,
+		   lexer_token_lex_size(this),
 		   begin->file_row + 1,
 		   begin->file_col + 1,
 		   this->has_white_space,
@@ -1629,6 +1648,92 @@ err_t lexer_lex_char_const(struct lexer *this,
 	out->lex_size += cp.cp_size;
 	return lexer_token_store_code_point(out, cp.cp, NULL);
 }
+#endif
+/* The lexer pos is at teh start delimiter. */
+static
+err_t lexer_lex_char_const(struct lexer *this,
+						   struct lexer_token *out)
+{
+	err_t err;
+	bool is_start;
+	struct code_point cp;
+
+	/*
+	 * if invalid, then this is an integer-char-const.
+	 * else this is a prefixed char-const.
+	 */
+	if (out->type == LXR_TOKEN_INVALID)
+		out->type = LXR_TOKEN_INTEGER_CHAR_CONST;
+
+	/*
+	 * must be the starting delimiter. If it isn't, error.
+	 * Delims are part of the char-const, however they do not play a role in
+	 * determining the char-const's value.
+	 */
+	is_start = true;
+	while (true) {
+		err = lexer_peek_code_point(this, &cp);
+		if (err)
+			return err;
+		if (is_start && cp.cp != '\'')
+			return EINVAL;
+		lexer_consume_code_point(this, &cp);
+		out->lex_size += cp.cp_size;
+		if (!is_start && cp.cp == '\'')
+			break;
+		is_start = false;
+		/* Consume \' and \\ as one unit */
+		if (cp.cp != '\\')
+			continue;
+		err = lexer_peek_code_point(this, &cp);
+		if (err || (cp.cp != '\'' && cp.cp != '\\'))
+			continue;
+		lexer_consume_code_point(this, &cp);
+		out->lex_size += cp.cp_size;
+	}
+	return err;
+}
+
+/* The lexer is at the start delimiter. */
+static
+err_t lexer_lex_string_literal(struct lexer *this,
+							   struct lexer_token *out)
+{
+	err_t err;
+	bool is_start;
+	struct code_point cp;
+
+	/*
+	 * if invalid, then this is an char-string-literal.
+	 * else this is a prefixed string-literal.
+	 */
+	if (out->type == LXR_TOKEN_INVALID)
+		out->type = LXR_TOKEN_CHAR_STRING_LITERAL;
+
+	is_start = true;
+	while (true) {
+		err = lexer_peek_code_point(this, &cp);
+		if (err)
+			return err;
+		if (is_start && cp.cp != '\"')
+			return EINVAL;
+		lexer_consume_code_point(this, &cp);
+		out->lex_size += cp.cp_size;
+		if (!is_start && cp.cp == '\"')
+			break;
+		is_start = false;
+		/* Consume \" and \\ as one unit */
+		if (cp.cp != '\\')
+			continue;
+		err = lexer_peek_code_point(this, &cp);
+		if (err || (cp.cp != '\"' && cp.cp != '\\'))
+			continue;
+		lexer_consume_code_point(this, &cp);
+		out->lex_size += cp.cp_size;
+	}
+	return err;
+}
+
 /*
  * Called when detecting a token starting with u/U/L. If what follows doesn't
  * describe a char-const or a string-literal, then the token is treated as a
@@ -1640,9 +1745,9 @@ err_t lexer_lex_prefixed_char_const_or_string_literal(struct lexer *this,
 {
 	err_t err;
 	struct code_point cp[3];
-	struct lexer_position save[2];
+	struct lexer_position save;
 
-	save[0] = this->position;	/* Save in case we have to rewind */
+	save = this->position;	/* Save in case we have to rewind */
 
 	err = lexer_peek_code_point(this, &cp[0]);
 	if (err)
@@ -1652,29 +1757,17 @@ err_t lexer_lex_prefixed_char_const_or_string_literal(struct lexer *this,
 	assert(cp[0].cp == 'u' || cp[0].cp == 'U' || cp[0].cp == 'L');
 
 	err = lexer_peek_code_point(this, &cp[1]);
-	if (err)
-		goto lex_identifier;
-	if (cp[0].cp == 'u' &&
-		cp[1].cp != '8' && cp[1].cp != '\'' && cp[1].cp != '\"')
-		goto lex_identifier;
-	if (cp[0].cp == 'U' && cp[1].cp != '\'' && cp[1].cp != '\"')
-		goto lex_identifier;
-	if (cp[0].cp == 'L' && cp[1].cp != '\'' && cp[1].cp != '\"')
+	if (err || (cp[1].cp != '8' && cp[1].cp != '\'' && cp[1].cp != '\"'))
 		goto lex_identifier;
 
-	save[1] = this->position;	/* save the pos for ' or " delim. */
-	lexer_consume_code_point(this, &cp[1]);	/* consume ' or " */
-	out->lex_size += cp[1].cp_size;
-	if (cp[0].cp == 'u' && cp[1].cp == '8') {
+	if (cp[1].cp == '8') {
+		if (cp[0].cp != 'u')	/* 8 can follow only u */
+			goto lex_identifier;
+		lexer_consume_code_point(this, &cp[1]);	/* consume 8 */
+		out->lex_size += cp[1].cp_size;
 		err = lexer_peek_code_point(this, &cp[2]);
-		if (err)
+		if (err || (cp[2].cp != '\'' && cp[2].cp != '\"'))
 			goto lex_identifier;
-		if (cp[2].cp != '\'' && cp[2].cp != '\"')
-			goto lex_identifier;
-		/* u8 is already at the start delim, so no restore of save[1]. */
-	} else {
-		/* rewind back to start delim for u/U/L */
-		this->position = save[1];
 	}
 
 	if (cp[0].cp == 'u' && cp[1].cp == '8' && cp[2].cp == '\'')
@@ -1696,19 +1789,15 @@ err_t lexer_lex_prefixed_char_const_or_string_literal(struct lexer *this,
 		out->type = LXR_TOKEN_WCHAR_T_STRING_LITERAL;
 
 	assert(out->type != LXR_TOKEN_INVALID);
-
-	if (out->type == LXR_TOKEN_UTF_8_CHAR_CONST ||
-		out->type == LXR_TOKEN_UTF_16_CHAR_CONST ||
-		out->type == LXR_TOKEN_UTF_32_CHAR_CONST ||
-		out->type == LXR_TOKEN_WCHAR_T_CHAR_CONST)
+	if (lexer_token_is_char_const(out))
 		return lexer_lex_char_const(this, out);
 	return lexer_lex_string_literal(this, out);
 lex_identifier:
+	assert(out->type == LXR_TOKEN_INVALID);
 	out->lex_size = 0;
-	this->position = save[0];
+	this->position = save;
 	return lexer_lex_identifier(this, out);
 }
-#endif
 /*****************************************************************************/
 /* > >= >> >>= */
 static
@@ -2368,8 +2457,10 @@ err_t _lexer_lex_token(struct lexer *this,
 
 	if (out->is_first)
 		printf("%s: line begins\n", __func__);
-	printf("%s: pos %ld, file (%ld,%ld), ws? %d, 1st? %d, cp %c\n", __func__,
+	printf("%s: p(%ld,%2d), f(%ld,%ld), ws? %d, 1st? %d, cp %c\n",
+		   __func__,
 		   this->begin.lex_pos,
+		   0,
 		   this->begin.file_row + 1,
 		   this->begin.file_col + 1,
 		   out->has_white_space,
@@ -2413,14 +2504,12 @@ err_t _lexer_lex_token(struct lexer *this,
 		err = lexer_lex_mul(this, out);
 	else if (cp.cp == '.')
 		err = lexer_lex_dot(this, out);
-#if 0
 	else if (cp.cp == 'u' || cp.cp == 'U' || cp.cp == 'L')
 		err = lexer_lex_prefixed_char_const_or_string_literal(this, out);
 	else if (cp.cp == '\'')
 		err = lexer_lex_char_const(this, out);
 	else if (cp.cp == '\"')
 		err = lexer_lex_string_literal(this, out);
-#endif
 	else if (cp.cp == '\\')
 		err = lexer_lex_back_slash(this, out);
 	else if (is_xid_start(cp.cp))
