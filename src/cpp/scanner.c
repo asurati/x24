@@ -203,6 +203,7 @@ err_t cpp_token_new_number(const int num,
 		str[0] = '1';
 
 	/* The ref-count is still 0. TODO move thes einto lexer.  */
+	base->source = base->resolved = str;
 	base->lex_size = base->source_len =  base->resolved_len = 1;
 	base->type = LXR_TOKEN_NUMBER;
 	err = cpp_token_new(base, &this);
