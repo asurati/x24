@@ -1990,6 +1990,10 @@ err_t cpp_tokens_expand_object_like(const struct queue *repl,
 	return err;
 }
 /*****************************************************************************/
+/*
+ * the has_white_space and is_first applies to the string, not to the element
+ * that is at the beginning of the stringizing arg list.
+ */
 static
 err_t cpp_tokens_stringize(const struct queue *this,
 						   const bool has_white_space,
@@ -2022,9 +2026,7 @@ err_t cpp_tokens_stringize(const struct queue *this,
 	queue_for_each(this, i, t) {
 		/* We may have to remove placemarkers */
 		assert(cpp_token_type(t) != LXR_TOKEN_PLACE_MARKER);
-		if (i == 0)
-			len += has_white_space;
-		else
+		if (i)
 			len += cpp_token_has_white_space(t);
 		/* replace \ with \\, and " with \" */
 		src = cpp_token_source(t);
@@ -2044,9 +2046,7 @@ err_t cpp_tokens_stringize(const struct queue *this,
 	k = 0;
 	str[k++] = '\"';
 	queue_for_each(this, i, t) {
-		if (i == 0 && has_white_space)
-			str[k++] = ' ';
-		else if (i && cpp_token_has_white_space(t))
+		if (i && cpp_token_has_white_space(t))
 			str[k++] = ' ';
 		/* replace \ with \\, and " with \" */
 		src = cpp_token_source(t);
@@ -2840,6 +2840,16 @@ err_t cpp_token_stream_collect_arguments(struct cpp_token_stream *stream,
 	while (!queue_is_empty(&tokens)) {
 		token = queue_remove_head(&tokens);
 		type = cpp_token_type(token);
+
+		/*
+		 * Any token that has is_first == true and has_white_space == false
+		 * convert that to is_first == false and has_white_space == true.
+		 * This straightens the arg-list.
+		 */
+		if (cpp_token_is_first(token) && !cpp_token_has_white_space(token)) {
+			token->is_first = false;
+			token->has_white_space = true;
+		}
 
 		/*
 		 * This is an arg-separating comma. num_args increases.
