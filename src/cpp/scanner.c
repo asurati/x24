@@ -21,6 +21,9 @@ static
 const struct macro *scanner_find_macro(const struct scanner *this,
 									   const char *ident);
 static
+err_t cpp_token_stream_remove_head(struct cpp_token_stream *this,
+								   struct cpp_token **out);
+static
 err_t scanner_expand_argument(struct scanner *this,
 							  const struct queue *arg,
 							  struct queue *out);
@@ -194,30 +197,44 @@ err_t cpp_token_new_number(const int num,
 						   struct cpp_token **out)
 {
 	err_t err;
+	int num_digits, n, len;
 	char *str;
+	struct lexer *lexer;
+	struct cpp_token_stream stream;
 	struct cpp_token *this;
-	struct lexer_token *base;
 
-	assert(num == 1 || num == 0);	/* For now */
+	assert(num >= 0);	/* For now */
 
-	base = malloc(sizeof(*base));
-	lexer_token_init(base);	/* ref-count is 1 */
+	num_digits = 0;
+	n = num;
+	while (n) {
+		++num_digits;
+		n /= 10;
+	}
+	if (num_digits == 0) {
+		assert(num == 0);
+		num_digits = 1;
+	}
 
-	str = malloc(2);
+	len = num_digits + 1;	/* nl */
+	str = malloc(len + 1);	/* nul */
 	if (str == NULL)
 		return ENOMEM;
-	str[0] = '0';
-	str[1] = NULL_CHAR;
-	if (num)
-		str[0] = '1';
+	sprintf(str, "%d", num);
+	str[len - 1] = '\n';
+	str[len] = NULL_CHAR;
 
-	/* The ref-count is still 0. TODO move thes einto lexer.  */
-	base->source = base->resolved = str;
-	base->lex_size = base->source_len =  base->resolved_len = 1;
-	base->type = LXR_TOKEN_NUMBER;
-	err = cpp_token_new(base, &this);
+	err = lexer_new(NULL, str, len, &lexer);
 	if (err)
 		return err;
+	cpp_token_stream_init(&stream, lexer);
+	err = cpp_token_stream_remove_head(&stream, &this);
+	if (err)
+		return err;
+	assert(cpp_token_type(this) == LXR_TOKEN_NUMBER);
+	assert(cpp_token_stream_is_empty(&stream));
+	lexer_delete(lexer);
+
 	this->is_first = is_first;
 	this->has_white_space = has_white_space;
 	*out = this;
@@ -1552,7 +1569,10 @@ err_t scanner_scan_directive_if(struct scanner *this,
 				return EINVAL;
 		}
 
-		/* if neither identifer, nor char-const, continue. */
+		/*
+		 * if neither identifer, nor char-const, continue.
+		 * numbers are also added here
+		 */
 		if (!cpp_token_is_identifier(token) &&
 			!cpp_token_is_char_const(token)) {
 			err = queue_add_tail(&tokens, token);
@@ -1582,11 +1602,11 @@ err_t scanner_scan_directive_if(struct scanner *this,
 		cpp_token_delete(token);
 
 		/*
-		 * For now, we only support a num which is 0 or 1.
+		 * For now, we only support +ve nums.
 		 * If any header turns up with #if constructs of a number other than
 		 * those, fix.
 		 */
-		assert(num == 0 || num == 1);
+		assert(num >= 0);
 		err = cpp_token_new_number(num, has_white_space, is_first, &token);
 		if (!err)
 			err = queue_add_tail(&tokens, token);
@@ -1831,7 +1851,8 @@ err_t scanner_scan_directive(struct scanner *this,
 	/*
 	 * type is not peer to #if's, is it another #if?
 	 * #if, #ifdef and #ifndef can start new regions, even within other
-	 * regions.
+	 * regions. We must track these if's so that their elif/else/endif can be
+	 * tracked.
 	 */
 	if (type == LXR_TOKEN_DIRECTIVE_IF_DEFINED)
 		return scanner_scan_directive_ifdef(this, false, line);
