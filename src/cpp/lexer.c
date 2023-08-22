@@ -63,6 +63,9 @@ static const char *g_punctuator[] = {
 	"&",
 	"<",
 	">",
+	"'",
+	"\"",
+	"`",
 
 	/* Double-char tokens */
 	"##",
