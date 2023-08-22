@@ -3,5 +3,7 @@
   replacement-list. If the arg corresponds to the first element in the
   replacement-list, its first token must maintain the same white-space distance
   as maintained by the invocation from the token previous to the invocation.
+- Suppose '#define str(s) #s'. Then str(\n) should not duplicate the
+  back-slash.
 - Support __has_include, __has_embed __has_c_attribute.
 - Convert cpp_tokens into cc_tokens, and begin parsing the C grammar.
