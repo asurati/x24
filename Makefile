@@ -86,7 +86,8 @@ CFLAGS += -fno-asynchronous-unwind-tables -fsigned-char
 # ASAN:
 # CFLAGS += -fno-omit-frame-pointer -fno-optimize-sibling-calls
 # CFLAGS += -fsanitize=address
-# Build/Link:	$(CC) $^ -fsanitize=address -static-libsan -o $@
+# Build/Link:
+# $(CC) $^ -fsanitize=address -static-libsan -o $@
 
 # These exports are needed by the BUILD command.
 export CC CPP AR CFLAGS CPPFLAGS ARFLAGS BIN_AR
@@ -101,6 +102,7 @@ all: $(BIN)
 	@:
 
 $(BIN): $(BIN_AR)
+	#$(CC) $^ -fsanitize=address -static-libsan -o $@
 	$(CC) $^ -o $@
 
 $(BIN_AR): $(DIRS)
