@@ -37,7 +37,7 @@ const char *cc_token_string(const struct cc_token *this)
 }
 
 static inline
-const char *cc_token_string_length(const struct cc_token *this)
+size_t cc_token_string_length(const struct cc_token *this)
 {
 	return this->string_len;
 }
@@ -56,11 +56,33 @@ bool cc_token_is_predefined_const(const struct cc_token *this)
 			cc_token_type(this) == CC_TOKEN_NULL_PTR);
 }
 
+/* a keyword is also an identifier */
 static inline
 bool cc_token_is_keyword(const struct cc_token *this)
 {
 	return (cc_token_type(this) >= CC_TOKEN_ATOMIC &&
 			cc_token_type(this) <= CC_TOKEN_WHILE);
+}
+
+static inline
+bool cc_token_is_identifier(const struct cc_token *this)
+{
+	return (cc_token_type(this) >= CC_TOKEN_IDENTIFIER &&
+			cc_token_type(this) <= CC_TOKEN_WHILE);
+}
+
+static inline
+bool cc_token_is_string_literal(const struct cc_token *this)
+{
+	return (cc_token_type(this) >= CC_TOKEN_CHAR_STRING_LITERAL &&
+			cc_token_type(this) <= CC_TOKEN_WCHAR_T_STRING_LITERAL);
+}
+
+static inline
+bool cc_token_is_char_const(const struct cc_token *this)
+{
+	return (cc_token_type(this) >= CC_TOKEN_INTEGER_CHAR_CONST &&
+			cc_token_type(this) <= CC_TOKEN_WCHAR_T_CHAR_CONST);
 }
 
 void cc_token_delete(void *this);

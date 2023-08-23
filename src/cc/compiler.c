@@ -4,6 +4,8 @@
 
 #include "compiler.h"
 
+#include <inc/unicode.h>
+
 #include <assert.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -14,6 +16,13 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/mman.h>
+/*****************************************************************************/
+void cc_token_delete(void *p)
+{
+	struct cc_token *this = p;
+	free((void *)this->string);
+	free(this);
+}
 /*****************************************************************************/
 err_t compiler_new(const char *path,
 				   struct compiler **out)
@@ -76,8 +85,166 @@ err_t compiler_delete(struct compiler *this)
 }
 /*****************************************************************************/
 static
+err_t cc_token_convert_radix(struct cc_token *this,
+							 const int radix)
+{
+	bool was_prev_separator, dot_seen;
+	const char *str;
+	size_t i, str_len, num_digits;
+
+	str = cc_token_string(this);
+	str_len = cc_token_string_length(this);
+
+	num_digits = 0;
+	i = 0;
+	if (radix == 2 || radix == 16)
+		i = 2;
+	if (i >= str_len)
+		return EINVAL;
+	was_prev_separator = dot_seen = false;
+	num_digits = 0;
+digits:
+	if (i == str_len) {
+		if (num_digits == 0 && dot_seen == false)
+			return EINVAL;
+		return ESUCCESS;
+	}
+
+	if (is_digit_in_radix(str[i], radix)) {
+		was_prev_separator = false;
+		++num_digits;
+		++i;
+		goto digits;
+	}
+
+	if (str[i] == '\'') {
+		/*
+		 * can't have separator without digits
+		 * can't have consec. separators.
+		 * can't have seperator ending the sequence.
+		 */
+		if (num_digits == 0 || was_prev_separator || i == str_len)
+			return EINVAL;
+		was_prev_separator = true;
+		++i;
+		goto digits;
+	}
+
+	/*
+	 * it is okay to not have digits before ., but then there must be at
+	 * least one digit after .
+	 * if there are digits before dot, then it is okay to not have digits
+	 * after dot.
+	 */
+	if (str[i] == '.') {
+		/*
+		 * can't have more than one dots.
+		 * can't have dot after the separator.
+		 * can't have dots in oct/bin numbers
+		 * can't have . after an exp.
+		 */
+		if (dot_seen || was_prev_separator || radix == 2 || radix == 8)
+			return EINVAL;
+
+		/* dot with nothing before it; it must have >= 1 digits after. */
+		if (num_digits == 0 &&
+			(i == str_len - 1 || !is_digit_in_radix(str[i + 1], radix)))
+			return EINVAL;
+
+		dot_seen = true;
+		num_digits = 0;	/* Can't have seperator imm. follow the dot */
+		goto digits;
+	}
+
+	if (str[i] == 'e' || str[i] == 'E') {
+		if (radix != 10)
+			return EINVAL;
+		goto exponent;
+	}
+
+	if (str[i] == 'p' || str[i] == 'P') {
+		if (radix != 16)
+			return EINVAL;
+		goto exponent;
+	}
+
+	/* float-suffix without exp */
+	if (str[i] == 'd' || str[i] == 'f' || str[i] == 'l' ||
+		str[i] == 'D' || str[i] == 'F' || str[i] == 'L')
+		goto floating_suffix;
+
+	return EINVAL;
+exponent:
+	if (num_digits == 0 && dot_seen == false)
+		return EINVAL;
+	assert(radix == 10 || radix == 16);
+	assert(str[i] == 'e' || str[i] == 'E' || str[i] == 'p' || str[i] == 'P');
+	if (++i == str_len)
+		return EINVAL;	/* There must be digits after exp */
+	if (str[i] == '+' || str[i] == '-')
+		++i;
+	num_digits = 0;
+	for (; i < str_len; ++i) {
+		if (!is_digit_in_radix(str[i], radix))
+			break;
+		++num_digits;
+	}
+	if (num_digits == 0)
+		return EINVAL;	/* There must be digits after exp. */
+	/* fall-thru */
+floating_suffix:
+	if (i == str_len)
+		return ESUCCESS;
+	if (str[i] == 'f' || str[i] == 'F' ||
+		str[i] == 'l' || str[i] == 'L') {
+		++i;
+		goto done;
+	}
+	if (str[i] != 'd' && str[i] != 'D')
+		return EINVAL;
+	++i;
+	if (i == str_len)
+		return EINVAL;
+	if (str[i] == 'f' || str[i] == 'F' ||
+		str[i] == 'd' || str[i] == 'D' ||
+		str[i] == 'l' || str[i] == 'L') {
+		++i;
+		goto done;
+	}
+	return EINVAL;
+done:
+	if (i != str_len)
+		return EINVAL;
+	return ESUCCESS;
+}
+
+/* converts from pp-number to one of the int/float consts. */
+static
 err_t cc_token_convert_number(struct cc_token *this)
 {
+	const char *str;
+	size_t i, str_len;
+
+	str = cc_token_string(this);
+	str_len = cc_token_string_length(this);
+	i = 0;
+
+	/* oct, hex or bin */
+	if (str[i] == '0') {
+		++i;
+		if (i == str_len) {
+			this->type = CC_TOKEN_INTEGER_CONST;
+			return ESUCCESS;
+		}
+
+		/* bin/oct can't have fractional consts, but hex can */
+		if (str[i] == 'x' || str[i] == 'X')
+			return cc_token_convert_radix(this, 16);
+		if (str[i] == 'b' || str[i] == 'B')
+			return cc_token_convert_radix(this, 2);
+		return cc_token_convert_radix(this, 8);
+	}
+	return cc_token_convert_radix(this, 10);
 }
 
 /* uint32_t, uint64_t, string bytes */
@@ -85,6 +252,7 @@ static
 err_t cc_token_stream_convert(struct cc_token_stream *this,
 							  struct cc_token **out)
 {
+	err_t err;
 	struct cc_token *token;
 	char *src;
 	size_t src_len;
@@ -112,6 +280,7 @@ err_t cc_token_stream_convert(struct cc_token_stream *this,
 	token->string = src;
 	token->string_len = src_len;
 
+	err = ESUCCESS;
 	if (type == CC_TOKEN_NUMBER)
 		err = cc_token_convert_number(token);
 	if (!err)
@@ -156,4 +325,9 @@ err_t cc_token_stream_remove_head(struct cc_token_stream *this,
 /*****************************************************************************/
 err_t compiler_compile(struct compiler *this)
 {
+	err_t err;
+	struct cc_token *token;
+
+	err = cc_token_stream_remove_head(&this->stream, &token);
+	return err;
 }

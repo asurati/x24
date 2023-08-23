@@ -1234,6 +1234,21 @@ bool is_bin_digit(const char32_t cp)
 }
 
 static inline
+bool is_digit_in_radix(const char32_t cp,
+					   const int radix)
+{
+	if (radix == 2)
+		return is_bin_digit(cp);
+	if (radix == 8)
+		return is_oct_digit(cp);
+	if (radix == 10)
+		return is_dec_digit(cp);
+	if (radix == 16)
+		return is_hex_digit(cp);
+	return false;
+}
+
+static inline
 int dec_digit_value(const char32_t cp)
 {
 	return cp - '0';
