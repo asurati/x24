@@ -1,0 +1,16 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Copyright (c) 2023 Amol Surati */
+
+/*
+ * These are tokens for the parse tree.
+ * Included after inc/cpp/tokens.h
+ */
+DEF(TRANSLATION_UNIT)
+DEF(EXTERNAL_DECLARATION)
+DEF(FUNCTION_DEFINITION)
+DEF(DECLARATION)
+DEF(ATTRIBUTE_SPECIFIER_SEQUENCE)
+DEF(DECLARATION_SPECIFIERS)
+DEF(DECLARATOR)
+DEF(FUNCTION_BODY)
+DEF(COMPOUND_STATEMENT)
