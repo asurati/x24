@@ -34,7 +34,7 @@ err_t lexer_lex_escape_char(struct lexer *this,
 							size_t *out_lex_size);
 /*****************************************************************************/
 static const char *g_lexer_token_type_str[] = {
-#define DEF(t)	"LXR_" # t,
+#define DEF(t)	"LXR_TOKEN_" # t,
 #include <inc/cpp/tokens.h>
 #undef DEF
 };

@@ -13,7 +13,7 @@
 #include <sys/types.h>
 
 enum lexer_token_type {
-#define DEF(t)	LXR_ ## t,
+#define DEF(t)	LXR_TOKEN_ ## t,
 #include <inc/cpp/tokens.h>
 #undef DEF
 };
