@@ -17,11 +17,27 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 /*****************************************************************************/
+static const char *g_cc_token_type_str[] = {
+#define DEF(t)	"CC_TOKEN_" # t,
+#include <inc/cpp/tokens.h>
+#undef DEF
+};
+
 void cc_token_delete(void *p)
 {
 	struct cc_token *this = p;
 	free((void *)this->string);
 	free(this);
+}
+
+static
+void cc_token_print(const struct cc_token *this)
+{
+	const char *type = g_cc_token_type_str[this->type];
+	printf("%s: %s", __func__, type);
+	if (this->string)
+		printf(" %s", this->string);
+	printf("\n");
 }
 /*****************************************************************************/
 err_t compiler_new(const char *path,
@@ -192,7 +208,7 @@ exponent:
 		++num_digits;
 	}
 	if (num_digits == 0)
-		return EINVAL;	/* There must be digits after exp. */
+		return EINVAL;	/* There must be at least one digit after exp. */
 	/* fall-thru */
 floating_suffix:
 	this->type = CC_TOKEN_FLOAT_CONST;
@@ -285,6 +301,10 @@ err_t cc_token_stream_convert(struct cc_token_stream *this,
 	token->string = src;
 	token->string_len = src_len;
 
+	/*
+	 * TODO convert string-literals and char-consts to their exec-char-set
+	 * representation.
+	 */
 	err = ESUCCESS;
 	if (type == CC_TOKEN_NUMBER)
 		err = cc_token_convert_number(token);
@@ -334,5 +354,7 @@ err_t compiler_compile(struct compiler *this)
 	struct cc_token *token;
 
 	err = cc_token_stream_remove_head(&this->stream, &token);
+	cc_token_print(token);
+	cc_token_delete(token);
 	return err;
 }

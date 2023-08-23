@@ -10,8 +10,9 @@
 #include <inc/types.h>
 
 enum cc_token_type {
-#define DEF(t)	CC_ ## t,
+#define DEF(t)	CC_TOKEN_ ## t,
 #include <inc/cpp/tokens.h>
+#include <inc/cc/tokens.h>
 #undef DEF
 };
 
@@ -128,6 +129,10 @@ void cc_token_stream_empty(struct cc_token_stream *this)
 {
 	queue_empty(&this->tokens);
 }
+/*****************************************************************************/
+struct parse_node {
+	enum cc_token_type	type;
+};
 /*****************************************************************************/
 struct compiler {
 	int	cpp_tokens_fd;
