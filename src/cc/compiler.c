@@ -91,6 +91,7 @@ err_t cc_token_convert_radix(struct cc_token *this,
 	bool was_prev_separator, dot_seen;
 	const char *str;
 	size_t i, str_len, num_digits;
+	this->type = CC_TOKEN_INTEGER_CONST;
 
 	str = cc_token_string(this);
 	str_len = cc_token_string_length(this);
@@ -104,11 +105,8 @@ err_t cc_token_convert_radix(struct cc_token *this,
 	was_prev_separator = dot_seen = false;
 	num_digits = 0;
 digits:
-	if (i == str_len) {
-		if (num_digits == 0 && dot_seen == false)
-			return EINVAL;
-		return ESUCCESS;
-	}
+	if (i == str_len)
+		goto done;
 
 	if (is_digit_in_radix(str[i], radix)) {
 		was_prev_separator = false;
@@ -151,8 +149,11 @@ digits:
 			(i == str_len - 1 || !is_digit_in_radix(str[i + 1], radix)))
 			return EINVAL;
 
+		this->type = CC_TOKEN_FLOAT_CONST;
 		dot_seen = true;
 		num_digits = 0;	/* Can't have seperator imm. follow the dot */
+		was_prev_separator = false;
+		++i;
 		goto digits;
 	}
 
@@ -175,6 +176,7 @@ digits:
 
 	return EINVAL;
 exponent:
+	this->type = CC_TOKEN_FLOAT_CONST;
 	if (num_digits == 0 && dot_seen == false)
 		return EINVAL;
 	assert(radix == 10 || radix == 16);
@@ -193,6 +195,7 @@ exponent:
 		return EINVAL;	/* There must be digits after exp. */
 	/* fall-thru */
 floating_suffix:
+	this->type = CC_TOKEN_FLOAT_CONST;
 	if (i == str_len)
 		return ESUCCESS;
 	if (str[i] == 'f' || str[i] == 'F' ||
@@ -213,7 +216,9 @@ floating_suffix:
 	}
 	return EINVAL;
 done:
-	if (i != str_len)
+	if (i != str_len || was_prev_separator)
+		return EINVAL;
+	if (num_digits == 0 && dot_seen == false)
 		return EINVAL;
 	return ESUCCESS;
 }
