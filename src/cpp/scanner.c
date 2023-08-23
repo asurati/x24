@@ -343,9 +343,13 @@ err_t cpp_token_stream_remove_head(struct cpp_token_stream *this,
 								   struct cpp_token **out)
 {
 	err_t err;
+	struct cpp_token *token;
 
 	err = cpp_token_stream_peek_head(this, out);
-	assert(err || queue_remove_head(&this->tokens) == *out);
+	if (err)
+		return err;
+	token = queue_remove_head(&this->tokens);
+	assert(token == *out);
 	return err;
 }
 /*****************************************************************************/

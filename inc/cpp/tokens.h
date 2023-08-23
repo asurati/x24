@@ -15,7 +15,10 @@ DEF(TOKEN_UTF_16_STRING_LITERAL)
 DEF(TOKEN_UTF_32_STRING_LITERAL)
 DEF(TOKEN_WCHAR_T_STRING_LITERAL)
 
-DEF(TOKEN_NUMBER)
+DEF(TOKEN_NUMBER)	/* Uses within cpp. cc uses these 3 below */
+DEF(TOKEN_INTEGER_CONST)
+DEF(TOKEN_FLOAT_CONST)
+DEF(TOKEN_ENUM_CONST)
 
 /* Maintain order with g_punctuators */
 /* Single-char tokens */
