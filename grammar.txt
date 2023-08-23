@@ -1,0 +1,481 @@
+# TranslationUnit must be first
+TranslationUnit:	ExternalDeclaration
+TranslationUnit:	TranslationUnit	ExternalDeclaration
+
+# Expression
+PrimaryExpression:	Identifier
+PrimaryExpression:	Constant
+PrimaryExpression:	StringLiteral
+PrimaryExpression:	(	Expression	)
+PrimaryExpression:	GenericSelection
+
+GenericSelection:	_Generic	(	AssignmentExpression	,	GenericAssocList	)
+
+GenericAssocList:	GenericAssociation
+GenericAssocList:	GenericAssocList	,	GenericAssociation
+
+GenericAssociation:	TypeName	:	AssignmentExpression
+GenericAssociation:	default	:	AssignmentExpression
+
+PostfixExpression:	PrimaryExpression
+PostfixExpression:	PostfixExpression	[	Expression	]
+PostfixExpression:	PostfixExpression	(	)
+PostfixExpression:	PostfixExpression	(	ArgumentExpressionList	)
+PostfixExpression:	PostfixExpression	.	Identifier
+PostfixExpression:	PostfixExpression	->	Identifier
+PostfixExpression:	PostfixExpression	++
+PostfixExpression:	PostfixExpression	--
+PostfixExpression:	CompoundLiteral
+
+ArgumentExpressionList:	ArgumentExpression
+ArgumentExpressionList:	ArgumentExpressionList	,	AssignmentExpression
+
+CompoundLiteral:	(	TypeName	)	BracedInitializer
+CompoundLiteral:	(	StorageClassSpecifiers	TypeName	)	BracedInitializer
+
+StorageClassSpecifiers:	StorageClassSpecifier
+StorageClassSpecifiers:	StorageClassSpecifiers	StorageClassSpecifier
+
+UnaryExpression:	PostfixExpression
+UnaryExpression:	++	UnaryExpression
+UnaryExpression:	--	UnaryExpression
+UnaryExpression:	UnaryOperator	CastExpression
+UnaryExpression:	sizeof	UnaryExpression
+UnaryExpression:	sizeof	(	TypeName	)
+UnaryExpression:	alignof	(	TypeName	)
+
+UnaryOperator:	&
+UnaryOperator:	*
+UnaryOperator:	+
+UnaryOperator:	-
+UnaryOperator:	~
+UnaryOperator:	!
+
+CastExpression:	UnaryExpression
+CastExpression:	(	TypeName	)	CastExpression
+
+MultiplicativeExpression:	CastExpression
+MultiplicativeExpression:	MultiplicativeExpression	*	CastExpression
+MultiplicativeExpression:	MultiplicativeExpression	/	CastExpression
+MultiplicativeExpression:	MultiplicativeExpression	%	CastExpression
+
+AdditiveExpression:	MultiplicativeExpression
+AdditiveExpression:	AdditiveExpression	+	MultiplicativeExpression
+AdditiveExpression:	AdditiveExpression	-	MultiplicativeExpression
+
+ShiftExpression:	AdditiveExpression
+ShiftExpression:	ShiftExpression	<<	AdditiveExpression
+ShiftExpression:	ShiftExpression	>>	AdditiveExpression
+
+RelationalExpression:	ShiftExpression
+RelationalExpression:	RelationalExpression	<	ShiftExpression
+RelationalExpression:	RelationalExpression	>	ShiftExpression
+RelationalExpression:	RelationalExpression	<=	ShiftExpression
+RelationalExpression:	RelationalExpression	>=	ShiftExpression
+
+EqualityExpression:	RelationalExpression
+EqualityExpression:	EqualityExpression	==	RelationalExpression
+EqualityExpression:	EqualityExpression	!=	RelationalExpression
+
+AndExpression:	EqualityExpression
+AndExpression:	AndExpression	&	EqualityExpression
+
+ExclusiveOrExpression:	AndExpression
+ExclusiveOrExpression:	ExclusiveOrExpression	^	AndExpression
+
+InclusiveOrExpression:	ExclusiveOrExpression
+InclusiveOrExpression:	InclusiveOrExpression	|	ExclusiveOrExpression
+
+LogicalAndExpression:	InclusiveOrExpression
+LogicalAndExpression:	LogicalAndExpression	&&	InclusiveOrExpression
+
+LogicalOrExpression:	LogicalAndExpression
+LogicalOrExpression:	LogicalOrExpression	||	LogicalAndExpression
+
+ConditionalExpression:	LogicalOrExpression
+ConditionalExpression:	LogicalOrExpression	?	Expression	:	ConditionalExpression
+
+AssignmentExpression:	ConditionalExpression
+AssignmentExpression:	UnaryExpression	AssignmentOperator	AssignmentExpression
+
+AssignmentOperator:	=
+AssignmentOperator:	*=
+AssignmentOperator:	/=
+AssignmentOperator:	%=
+AssignmentOperator:	+=
+AssignmentOperator:	-=
+AssignmentOperator:	<<=
+AssignmentOperator:	>>=
+AssignmentOperator:	&=
+AssignmentOperator:	^=
+AssignmentOperator:	|=
+
+Expression:	AssignmentExpression
+Expression:	Expression	,	AssignmentExpression
+
+ConstantExpression:	ConditionalExpression
+
+# Declaration
+Declaration:	DeclarationSpecifiers	;
+Declaration:	DeclarationSpecifiers	InitDeclaratorList	;
+Declaration:	AttributeSpecifierSequence	DeclarationSpecifiers	InitDeclaratorList	;
+Declaration:	StaticAssertDeclaration
+Declaration:	AttributeDeclaration
+
+DeclarationSpecifiers:	DeclarationSpecifier
+DeclarationSpecifiers:	DeclarationSpecifier	AttributeSpecifierSequence
+DeclarationSpecifiers:	DeclarationSpecifier	DeclarationSpecifiers
+
+DeclarationSpecifier:	StorageClassSpecifier
+DeclarationSpecifier:	TypeSpecifierQualifier
+DeclarationSpecifier:	FunctionSpecifier
+
+InitDeclaratorList:	InitDeclarator
+InitDeclaratorList:	InitDeclaratorList	,	InitDeclarator
+
+InitDeclarator:	Declarator
+InitDeclarator:	Declarator	=	Initializer
+
+AttributeDeclaration:	AttributeSpecifierSequence	;
+
+StorageClassSpecifier:	auto
+StorageClassSpecifier:	constexpr
+StorageClassSpecifier:	extern
+StorageClassSpecifier:	register
+StorageClassSpecifier:	static
+StorageClassSpecifier:	thread_local
+StorageClassSpecifier:	typedef
+
+TypeSpecifier:	void
+TypeSpecifier:	char
+TypeSpecifier:	short
+TypeSpecifier:	int
+TypeSpecifier:	long
+TypeSpecifier:	float
+TypeSpecifier:	double
+TypeSpecifier:	signed
+TypeSpecifier:	unsigned
+TypeSpecifier:	_BitInt	(	ConstantExpression	)
+TypeSpecifier:	bool
+TypeSpecifier:	_Complex
+TypeSpecifier:	_Decimal32
+TypeSpecifier:	_Decimal64
+TypeSpecifier:	_Decimal128
+TypeSpecifier:	AtomicTypeSpecifier
+TypeSpecifier:	StructOrUnionSpecifier
+TypeSpecifier:	EnumSpecifier
+TypeSpecifier:	TypedefName
+TypeSpecifier:	TypeofSpecifier
+
+StructOrUnionSpecifier:	StructOrUnion	{	MemberDeclarationList	}
+StructOrUnionSpecifier:	StructOrUnion	AttributeSpecifierSequence	{	MemberDeclarationList	}
+StructOrUnionSpecifier:	StructOrUnion	Identifier	{	MemberDeclarationList	}
+StructOrUnionSpecifier:	StructOrUnion	AttributeSpecifierSequence	Identifier	{	MemberDeclarationList	}
+StructOrUnionSpecifier:	StructOrUnion	Identifier
+StructOrUnionSpecifier:	StructOrUnion	AttributeSpecifierSequence	Identifier
+
+StructOrUnion:	struct
+StructOrUnion:	union
+
+MemberDeclarationList:	MemberDeclaration
+MemberDeclarationList:	MemberDeclarationList	MemberDeclaration
+
+MemberDeclaration:	SpecifierQualifierList
+MemberDeclaration:	AttributeSpecifierSequence	SpecifierQualifierList
+MemberDeclaration:	SpecifierQualifierList	MemberDeclaratorList
+MemberDeclaration:	AttributeSpecifierSequence	SpecifierQualifierList	MemberDeclaratorList
+MemberDeclaration:	StaticAssertDeclaration
+
+SpecifierQualifierList:	TypeSpecifierQualifier
+SpecifierQualifierList:	TypeSpecifierQualifier	AttributeSpecifierSequence
+SpecifierQualifierList:	TypeSpecifierQualifier	SpecifierQualifierList
+
+TypeSpecifierQualifier:	TypeSpecifier
+TypeSpecifierQualifier:	TypeQualifier
+TypeSpecifierQualifier:	AlignmentSpecifier
+
+MemberDeclaratorList:	MemberDeclarator
+MemberDeclaratorList:	MemberDeclaratorList	,	MemberDeclarator
+
+MemberDeclarator:	Declarator
+MemberDeclarator:	:	ConstantExpression
+MemberDeclarator:	Declarator	:	ConstantExpression
+
+EnumSpecifier:	enum	{	EnumeratorList	}
+EnumSpecifier:	enum	AttributeSpecifierSequence	{	EnumeratorList	}
+EnumSpecifier:	enum	Identifier	{	EnumeratorList	}
+EnumSpecifier:	enum	EnumTypeSpecifier	{	EnumeratorList	}
+EnumSpecifier:	enum	AttributeSpecifierSequence	Identifier	{	EnumeratorList	}
+EnumSpecifier:	enum	AttributeSpecifierSequence	EnumTypeSpecifier	{	EnumeratorList	}
+EnumSpecifier:	enum	Identifier	EnumTypeSpecifier	{	EnumeratorList	}
+EnumSpecifier:	enum	AttributeSpecifierSequence	Identifier	EnumTypeSpecifier	{	EnumeratorList	}
+
+EnumSpecifier:	enum	{	EnumeratorList	,	}
+EnumSpecifier:	enum	AttributeSpecifierSequence	{	EnumeratorList	,	}
+EnumSpecifier:	enum	Identifier	{	EnumeratorList	,	}
+EnumSpecifier:	enum	EnumTypeSpecifier	{	EnumeratorList	,	}
+EnumSpecifier:	enum	AttributeSpecifierSequence	Identifier	{	EnumeratorList	,	}
+EnumSpecifier:	enum	AttributeSpecifierSequence	EnumTypeSpecifier	{	EnumeratorList	,	}
+EnumSpecifier:	enum	Identifier	EnumTypeSpecifier	{	EnumeratorList	,	}
+EnumSpecifier:	enum	AttributeSpecifierSequence	Identifier	EnumTypeSpecifier	{	EnumeratorList	,	}
+
+EnumSpecifier:	enum	Identifier
+EnumSpecifier:	enum	Identifier	EnumTypeSpecifier
+
+EnumeratorList:	Enumerator
+EnumeratorList:	EnumeratorList	,	Enumerator
+
+Enumerator:	EnumerationConstant
+Enumerator:	EnumerationConstant	AttributeSpecifierSequence
+Enumerator:	EnumerationConstant	=	ConstantExpression
+Enumerator:	EnumerationConstant	AttributeSpecifierSequence	=	ConstantExpression
+
+EnumTypeSpecifier:	:	SpecifierQualifierList
+
+AtomicTypeSpecifier:	_Atomic	(	TypeName	)
+
+TypeofSpecifier:	typeof	(	TypeofSpecifierArgument	)
+TypeofSpecifier:	typeof_unqual	(	TypeofSpecifierArgument	)
+
+TypeofSpecifierArgument:	Expression
+TypeofSpecifierArgument:	TypeName
+
+TypeQualifier:	const
+TypeQualifier:	restrict
+TypeQualifier:	volatile
+TypeQualifier:	_Atomic
+
+FunctionSpecifier:	inline
+FunctionSpecifier:	_Noreturn
+
+AlignmentSpecifier:	alignas	(	TypeName	)
+AlignmentSpecifier:	alignas	(	ConstantExpression	)
+
+Declarator:	DirectDeclarator
+Declarator:	Pointer	DirectDeclarator
+
+DirectDeclarator:	Identifier
+DirectDeclarator:	Identifier	AttributeSpecifierSequence
+DirectDeclarator:	(	Declarator	)
+DirectDeclarator:	ArrayDeclarator
+DirectDeclarator:	ArrayDeclarator	AttributeSpecifierSequence
+DirectDeclarator:	FunctionDeclarator
+DirectDeclarator:	FunctionDeclarator	AttributeSpecifierSequence
+
+ArrayDeclarator:	DirectDeclarator	[	]
+ArrayDeclarator:	DirectDeclarator	[	TypeQualifierList	]
+ArrayDeclarator:	DirectDeclarator	[	AssignmentExpression	]
+ArrayDeclarator:	DirectDeclarator	[	TypeQualifierList	AssignmentExpression	]
+
+ArrayDeclarator:	DirectDeclarator	[	static	AssignmentExpression	]
+ArrayDeclarator:	DirectDeclarator	[	static	TypeQualifierList	AssignmentExpression	]
+
+ArrayDeclarator:	DirectDeclarator	[	TypeQualifierList	static	AssignmentExpression	]
+ArrayDeclarator:	DirectDeclarator	[	*	]
+ArrayDeclarator:	DirectDeclarator	[	TypeQualifierList	*	]
+
+
+FunctionDeclarator:	DirectDeclarator	(	)
+FunctionDeclarator:	DirectDeclarator	(	ParameterTypeList	)
+
+Pointer:	*
+Pointer:	*	AttributeSpecifierSequence
+Pointer:	*	TypeQualifierList
+Pointer:	*	AttributeSpecifierSequence	TypeQualifierList
+
+Pointer:	*	Pointer
+Pointer:	*	AttributeSpecifierSequence	Pointer
+Pointer:	*	TypeQualifierList	Pointer
+Pointer:	*	AttributeSpecifierSequence	TypeQualifierList	Pointer
+
+TypeQualifierList:	TypeQualifier
+TypeQualifierList:	TypeQualifierList	TypeQualifier
+
+ParameterTypeList:	ParameterList
+ParameterTypeList:	ParameterList	,	...
+ParameterTypeList:	...
+
+ParameterList:	ParameterDeclaration
+ParameterList:	ParameterList	,	ParameterDeclaration
+
+ParameterDeclaration:	DeclarationSpecifiers	Declarator
+ParameterDeclaration:	AttributeSpecifierSequence	DeclarationSpecifiers	Declarator
+ParameterDeclaration:	DeclarationSpecifiers
+ParameterDeclaration:	AttributeSpecifierSequence	DeclarationSpecifiers
+ParameterDeclaration:	DeclarationSpecifiers	AbstractDeclarator
+ParameterDeclaration:	AttributeSpecifierSequence	DeclarationSpecifiers	AbstractDeclarator
+
+TypeName:	SpecifierQualifierList
+TypeName:	SpecifierQualifierList	AbstractDeclarator
+
+AbstractDeclarator:	Pointer
+AbstractDeclarator:	DirectAbstractDeclarator
+AbstractDeclarator:	Pointer	DirectAbstractDeclarator
+
+DirectAbstractDeclarator:	(	AbstractDeclarator	)
+DirectAbstractDeclarator:	ArrayAbstractDeclarator
+DirectAbstractDeclarator:	ArrayAbstractDeclarator	AttributeSpecifierSequence
+DirectAbstractDeclarator:	FunctionAbstractDeclarator
+DirectAbstractDeclarator:	FunctionAbstractDeclarator	AttributeSpecifierSequence
+
+ArrayAbstractDeclarator:	[	]
+ArrayAbstractDeclarator:	[	TypeQualifierList	]
+ArrayAbstractDeclarator:	[	AssignmentExpression	]
+ArrayAbstractDeclarator:	[	TypeQualifierList	AssignmentExpression	]
+ArrayAbstractDeclarator:	[	static	AssignmentExpression	]
+ArrayAbstractDeclarator:	[	static	TypeQualifierList	AssignmentExpression	]
+ArrayAbstractDeclarator:	[	TypeQualifierList	static	AssignmentExpression	]
+ArrayAbstractDeclarator:	[	*	]
+
+ArrayAbstractDeclarator:	DirectAbstractDeclarator	[	]
+ArrayAbstractDeclarator:	DirectAbstractDeclarator	[	TypeQualifierList	]
+ArrayAbstractDeclarator:	DirectAbstractDeclarator	[	AssignmentExpression	]
+ArrayAbstractDeclarator:	DirectAbstractDeclarator	[	TypeQualifierList	AssignmentExpression	]
+ArrayAbstractDeclarator:	DirectAbstractDeclarator	[	static	AssignmentExpression	]
+ArrayAbstractDeclarator:	DirectAbstractDeclarator	[	static	TypeQualifierList	AssignmentExpression	]
+ArrayAbstractDeclarator:	DirectAbstractDeclarator	[	TypeQualifierList	static	AssignmentExpression	]
+ArrayAbstractDeclarator:	DirectAbstractDeclarator	[	*	]
+
+FunctionAbstractDeclarator:	(	)
+FunctionAbstractDeclarator:	(	ParameterTypeList	)
+FunctionAbstractDeclarator:	DirectAbstractDeclarator	(	)
+FunctionAbstractDeclarator:	DirectAbstractDeclarator	(	ParameterTypeList	)
+
+
+TypedefName:	Identifier
+
+BracedInitializer:	{	}
+BracedInitializer:	{	InitializerList	}
+BracedInitializer:	{	InitializerList	,	}
+
+Initializer:	AssignmentExpression
+Initializer:	BracedInitializer
+
+InitializerList:	Initializer
+InitializerList:	Designation	Initializer
+InitializerList:	InitializerList	,	Initializer
+InitializerList:	InitializerList	,	Designation	Initializer
+
+Designation:	DesignatorList	=
+
+DesignatorList:	Designator
+DesignatorList:	DesignatorList	Designator
+
+Designator:	[	ConstantExpression	]
+Designator:	.	Identifier
+
+StaticAssertDeclaration:	static_assert	(	ConstantExpression	,	StringLiteral	)	;
+StaticAssertDeclaration:	static_assert	(	ConstantExpression	)	;
+
+AttributeSpecifierSequence:	AttributeSpecifier
+AttributeSpecifierSequence:	AttributeSpecifierSequence	AttributeSpecifier
+
+AttributeSpecifier:	[	[	AttributeList	]	]
+
+AttributeList:	epsilon
+AttributeList:	Attribute
+AttributeList:	AttributeList	,
+AttributeList:	AttributeList	,	Attribute
+
+Attribute:	AttributeToken
+Attribute:	AttributeToken	AttributeArgumentClause
+
+AttributeToken:	StandardAttribute
+AttributeToken:	AttributePrefixedToken
+
+StandardAttribute:	Identifier
+
+AttributePrefixedToken:	AttributePrefix	::	Identifier
+
+AttributePrefix:	Identifier
+
+AttributeArgumentClause:	(	)
+AttributeArgumentClause:	(	BalancedTokenSequence	)
+
+BalancedTokenSequence:	BalancedToken
+BalancedTokenSequence:	BalancedTokenSequence	BalancedToken
+
+BalancedToken:	(	)
+BalancedToken:	[	]
+BalancedToken:	{	}
+BalancedToken:	(	BalancedTokenSequence	)
+BalancedToken:	[	BalancedTokenSequence	]
+BalancedToken:	{	BalancedTokenSequence	}
+BalancedToken:	any token other three brackets
+
+# Statement
+
+Statement:	LabeledStatement
+Statement:	UnlabeledStatement
+
+UnlabeledStatement:	ExpressionStatement
+UnlabeledStatement:	PrimaryBlock
+UnlabeledStatement:	AttributeSpecifierSequence	PrimaryBlock
+UnlabeledStatement:	JumpStatement
+UnlabeledStatement:	AttributeSpecifierSequence	JumpStatement
+
+PrimaryBlock:	CompoundStatement
+PrimaryBlock:	SelectionStatement
+PrimaryBlock:	IterationStatement
+
+SecondaryBlock:	Statement
+
+Label:	Identifier	:
+Label:	case	ConstantExpression	:
+Label:	default	:
+Label:	AttributeSpecifierSequence	Identifier	:
+Label:	AttributeSpecifierSequence	case	ConstantExpression	:
+Label:	AttributeSpecifierSequence	default	:
+
+
+LabeledStatement:	Label	Statement
+
+CompoundStatement:	{	}
+CompoundStatement:	{	BlockItemList	}
+
+BlockItemList:	BlockItem
+BlockItemList:	BlockItemList	BlockItem
+
+BlockItem:	Declaration
+BlockItem:	UnlabeledStatement
+BlockItem:	Label
+
+ExpressionStatement:	;
+ExpressionStatement:	Expression	;
+ExpressionStatement:	AttributeSpecifierSequence	Expression	;
+
+SelectionStatement:	if	(	Expression	)	SecondaryBlock
+SelectionStatement:	if	(	Expression	)	SecondaryBlock	else	SecondaryBlock
+SelectionStatement:	switch	(	Expression	)	SecondaryBlock
+
+IterationStatement:	while	(	Expression	)	SecondaryBlock
+IterationStatement:	do	SecondaryBlock	while	(	Expression	)	;
+
+IterationStatement:	for	(	;	;	)	SecondaryBlock
+IterationStatement:	for	(	Expression	;	;	)	SecondaryBlock
+IterationStatement:	for	(	;	Expression	;	)	SecondaryBlock
+IterationStatement:	for	(	;	;	Expression	)	SecondaryBlock
+IterationStatement:	for	(	Expression	;	Expression	;	)	SecondaryBlock
+IterationStatement:	for	(	Expression	;	;	Expression	)	SecondaryBlock
+IterationStatement:	for	(	;	Expression	;	Expression	)	SecondaryBlock
+IterationStatement:	for	(	Expression	;	Expression	;	Expression	)	SecondaryBlock
+
+IterationStatement:	for	(	Declaration	;	)	SecondaryBlock
+IterationStatement:	for	(	Declaration	Expression	;	)	SecondaryBlock
+IterationStatement:	for	(	Declaration	;	Expression	)	SecondaryBlock
+IterationStatement:	for	(	Declaration	Expression	;	Expression	)	SecondaryBlock
+
+JumpStatement:	goto	Identifier	;
+JumpStatement:	continue	;
+JumpStatement:	break	;
+JumpStatement:	return	;
+JumpStatement:	return	Expression	;
+
+# external def
+ExternalDeclaration:	FunctionDefinition
+ExternalDeclaration:	Declaration
+
+FunctionDefinition:	DeclarationSpecifiers	Declarator	FunctionBody
+FunctionDefinition:	AttributeSpecifierSequence	DeclarationSpecifiers	Declarator	FunctionBody
+
+FunctionBody:	CompoundStatement
