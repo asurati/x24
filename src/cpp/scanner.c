@@ -3258,6 +3258,7 @@ err_t scanner_serialize_cpp_token(struct scanner *this,
 	if (src_len == 0)
 		return ESUCCESS;
 
+	size = src_len;
 	buf = cpp_token_source(token);
 	assert(buf);
 	ret = write(this->cpp_tokens_fd, buf, size);
