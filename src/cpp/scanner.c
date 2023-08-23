@@ -770,7 +770,6 @@ static
 err_t scanner_check_macro_redefine(const struct scanner *this,
 								   const struct macro *macro)
 {
-	int i;
 	const struct macro *m[2];
 	const char *name[2];
 	enum lexer_token_type type;
@@ -792,19 +791,13 @@ err_t scanner_check_macro_redefine(const struct scanner *this,
 
 	/* Check the list of macros to see if this is a redefine. */
 	name[0] = cpp_token_resolved(macro->identifier);
-	array_for_each(&this->macros, i, m[1]) {
-		if (m[1] == NULL)
-			continue;	/* there can be gaps */
-		name[1] = cpp_token_resolved(m[1]->identifier);
-		if (strcmp(name[0], name[1]))
-			continue;
-		if (macro_are_identical(m))
-			return ESUCCESS;
-		/* Same identifier, but not identical. Raise error */
-		return EINVAL;
-	}
-	/* Not found at all. */
-	return ENOENT;
+	m[1] = scanner_find_macro(this, name[0]);
+	if (m[1] == NULL)
+		return ENOENT;	/* Not found at all */
+	if (macro_are_identical(m))
+		return ESUCCESS;
+	/* Same identifier, but not identical. Raise error */
+	return EINVAL;
 }
 
 static
