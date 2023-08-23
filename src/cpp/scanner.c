@@ -3228,6 +3228,44 @@ err_t scanner_serialize_cpp_tokens(struct scanner *this,
 	return err;
 }
 #endif
+static
+err_t scanner_serialize_cpp_token(struct scanner *this,
+								  const struct cpp_token *token)
+{
+	size_t src_len;
+	int ret;
+	size_t size;
+	const void *buf;
+	enum lexer_token_type type;
+
+	/* First write the lexer_token type */
+	type = cpp_token_type(token);
+	buf = &type;
+	size = sizeof(type);
+	ret = write(this->cpp_tokens_fd, buf, size);
+	if (ret < 0)
+		return errno;
+
+	/* Then write source_len */
+	src_len = cpp_token_source_length(token);
+	buf = &src_len;
+	size = sizeof(src_len);
+	ret = write(this->cpp_tokens_fd, buf, size);
+	if (ret < 0)
+		return errno;
+
+	/* If the source_len is not 0, then write the source. */
+	if (src_len == 0)
+		return ESUCCESS;
+
+	buf = cpp_token_source(token);
+	assert(buf);
+	ret = write(this->cpp_tokens_fd, buf, size);
+	if (ret < 0)
+		return errno;
+	return ESUCCESS;
+}
+
 /* out is initialized by the caller */
 static
 err_t cpp_token_stream_scan_line(struct cpp_token_stream *this,
@@ -3287,7 +3325,7 @@ err_t scanner_scan_file(struct scanner *this,
 	struct queue mstk;
 	struct cpp_token_stream stream;
 	struct lexer *lexer;
-	struct cpp_token *token, *prev;
+	struct cpp_token *token;
 	static int depth = -1;	/* file inclusion depth */
 
 	++depth;
@@ -3304,7 +3342,6 @@ err_t scanner_scan_file(struct scanner *this,
 		goto err1;
 	}
 
-	prev = NULL;
 	stack_init(&mstk);
 	cpp_token_stream_init(&stream, lexer);
 	queue_init(&line, cpp_token_delete);
@@ -3368,21 +3405,21 @@ err_t scanner_scan_file(struct scanner *this,
 			printf("%s", cpp_token_source(token));
 		}
 		printf("\n");
-#if 0
-		err = scanner_serialize_cpp_tokens(this, &prev, &output);
-		if (err)
-			break;
-#else
-		queue_empty(&output);
-#endif
+		queue_for_each_with_rem(&output, token) {
+			err = scanner_serialize_cpp_token(this, token);
+			if (err)
+				break;
+			cpp_token_delete(token);
+		}
+		/*queue_empty(&output);*/
 		assert(queue_is_empty(&output));
 	}
-	if (!err && prev) {
 #if 0
+	if (!err && prev) {
 		err = scanner_serialize_cpp_token(this, prev);
 		cpp_token_delete(prev);
-#endif
 	}
+#endif
 	printf("%s[%d]: %s ends with %d\n", __func__, depth, path, err);
 err1:
 	lexer_delete(lexer);
