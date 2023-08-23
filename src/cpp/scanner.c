@@ -106,7 +106,7 @@ err_t scanner_delete(struct scanner *this)
 	assert(this);
 
 	close(this->cpp_tokens_fd);
-	unlink(this->cpp_tokens_path);
+	/*unlink(this->cpp_tokens_path);*/
 	free((void *)this->cpp_tokens_path);
 
 	assert(stack_num_entries(&this->cistk) == 0);
@@ -115,6 +115,11 @@ err_t scanner_delete(struct scanner *this)
 	return ESUCCESS;
 }
 
+const char *scanner_cpp_tokens_path(const struct scanner *this)
+{
+	return this->cpp_tokens_path;
+}
+/*****************************************************************************/
 static
 int scanner_find_macro_index(const struct scanner *this,
 							 const char *ident)
