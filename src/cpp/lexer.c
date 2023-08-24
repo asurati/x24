@@ -33,13 +33,13 @@ err_t lexer_lex_escape_char(struct lexer *this,
 							char32_t *out_value,
 							size_t *out_lex_size);
 /*****************************************************************************/
-static const char *g_lexer_token_type_str[] = {
+static const char *g_lexer_token_type_strs[] = {
 #define DEF(t)	"LXR_TOKEN_" # t,
 #include <inc/cpp/tokens.h>
 #undef DEF
 };
 
-static const char *g_punctuator[] = {
+static const char *g_punctuators[] = {
 	/* Single-char tokens */
 	"{",
 	"[",
@@ -100,7 +100,7 @@ static const char *g_punctuator[] = {
 	"...",
 };
 
-static const char *g_key_word[] = {
+static const char *g_key_words[] = {
 	"_Atomic",
 	"_BitInt",
 	"_Complex",
@@ -412,7 +412,7 @@ err_t lexer_token_resolve(struct lexer_token *this)
 {
 	err_t err;
 	char *resolved;
-	char code_unit[4];
+	char code_units[4];
 	const char *src;
 	struct lexer *lexer;
 	size_t i, src_len, size, lex_size, j;
@@ -446,7 +446,7 @@ err_t lexer_token_resolve(struct lexer_token *this)
 
 		/* Incr. output by the src-char-set (utf-8) enc-size of the cp. */
 		memset(&state, 0, sizeof(state));
-		cp.cp_size = c32rtomb(code_unit, cp.cp, &state);
+		cp.cp_size = c32rtomb(code_units, cp.cp, &state);
 		if (cp.cp_size < 0)
 			return EINVAL;
 		if (cp.cp_size == 0)
@@ -481,11 +481,11 @@ err_t lexer_token_resolve(struct lexer_token *this)
 		i += lex_size; /* Incr input. by lex_size */
 
 		memset(&state, 0, sizeof(state));
-		cp.cp_size = c32rtomb(code_unit, cp.cp, &state);
+		cp.cp_size = c32rtomb(code_units, cp.cp, &state);
 		assert(cp.cp_size >= 0 && cp.cp_size <= 4);	/* utf-8 */
 		if (cp.cp_size == 0)
 			cp.cp_size = 1;	/* nul char */
-		memcpy(&resolved[j], code_unit, cp.cp_size);
+		memcpy(&resolved[j], code_units, cp.cp_size);
 		j += cp.cp_size;	/* Incr. output by the utf-8 enc-size */
 	}
 	free(lexer);
@@ -515,13 +515,13 @@ err_t lexer_build_source(struct lexer *this,
 
 	/* punctuators do not need to alloc memory for storing src/reslvd */
 	if (type >= LXR_TOKEN_LEFT_BRACE && type <= LXR_TOKEN_ELLIPSIS) {
-		token->source = g_punctuator[type - LXR_TOKEN_LEFT_BRACE];
+		token->source = g_punctuators[type - LXR_TOKEN_LEFT_BRACE];
 		goto sourced;
 	}
 
 	/* key-words do not need to alloc memory for storing src/reslvd */
 	if (type >= LXR_TOKEN_ATOMIC && type <= LXR_TOKEN_DIRECTIVE_WARNING) {
-		token->source = g_key_word[type - LXR_TOKEN_ATOMIC];
+		token->source = g_key_words[type - LXR_TOKEN_ATOMIC];
 		goto sourced;
 	}
 
@@ -682,7 +682,7 @@ void lexer_token_print(const struct lexer_token *this,
 					   const struct lexer_position *begin,
 					   const char *msg)
 {
-	const char *type = g_lexer_token_type_str[this->type];
+	const char *type = g_lexer_token_type_strs[this->type];
 	/*
 	 * p for lexer-position.
 	 * f for file-position.
@@ -1908,48 +1908,48 @@ err_t lexer_lex_prefixed_char_const_or_string_literal(struct lexer *this,
 													  struct lexer_token *out)
 {
 	err_t err;
-	struct code_point cp[3];
+	struct code_point cps[3];
 	struct lexer_position save;
 
 	save = this->position;	/* Save in case we have to rewind */
 
-	err = lexer_peek_code_point(this, &cp[0]);
+	err = lexer_peek_code_point(this, &cps[0]);
 	if (err)
 		return err;
-	lexer_consume_code_point(this, &cp[0]);	/* consume */
-	out->lex_size += cp[0].cp_size;
-	assert(cp[0].cp == 'u' || cp[0].cp == 'U' || cp[0].cp == 'L');
+	lexer_consume_code_point(this, &cps[0]);	/* consume */
+	out->lex_size += cps[0].cp_size;
+	assert(cps[0].cp == 'u' || cps[0].cp == 'U' || cps[0].cp == 'L');
 
-	err = lexer_peek_code_point(this, &cp[1]);
-	if (err || (cp[1].cp != '8' && cp[1].cp != '\'' && cp[1].cp != '\"'))
+	err = lexer_peek_code_point(this, &cps[1]);
+	if (err || (cps[1].cp != '8' && cps[1].cp != '\'' && cps[1].cp != '\"'))
 		goto lex_identifier;
 
-	if (cp[1].cp == '8') {
-		if (cp[0].cp != 'u')	/* 8 can follow only u */
+	if (cps[1].cp == '8') {
+		if (cps[0].cp != 'u')	/* 8 can follow only u */
 			goto lex_identifier;
-		lexer_consume_code_point(this, &cp[1]);	/* consume 8 */
-		out->lex_size += cp[1].cp_size;
-		err = lexer_peek_code_point(this, &cp[2]);
-		if (err || (cp[2].cp != '\'' && cp[2].cp != '\"'))
+		lexer_consume_code_point(this, &cps[1]);	/* consume 8 */
+		out->lex_size += cps[1].cp_size;
+		err = lexer_peek_code_point(this, &cps[2]);
+		if (err || (cps[2].cp != '\'' && cps[2].cp != '\"'))
 			goto lex_identifier;
 	}
 
-	if (cp[0].cp == 'u' && cp[1].cp == '8' && cp[2].cp == '\'')
+	if (cps[0].cp == 'u' && cps[1].cp == '8' && cps[2].cp == '\'')
 		out->type = LXR_TOKEN_UTF_8_CHAR_CONST;
-	if (cp[0].cp == 'u' && cp[1].cp == '\'')
+	if (cps[0].cp == 'u' && cps[1].cp == '\'')
 		out->type = LXR_TOKEN_UTF_16_CHAR_CONST;
-	if (cp[0].cp == 'U' && cp[1].cp == '\'')
+	if (cps[0].cp == 'U' && cps[1].cp == '\'')
 		out->type = LXR_TOKEN_UTF_32_CHAR_CONST;
-	if (cp[0].cp == 'L' && cp[1].cp == '\'')
+	if (cps[0].cp == 'L' && cps[1].cp == '\'')
 		out->type = LXR_TOKEN_WCHAR_T_CHAR_CONST;
 
-	if (cp[0].cp == 'u' && cp[1].cp == '8' && cp[2].cp == '\"')
+	if (cps[0].cp == 'u' && cps[1].cp == '8' && cps[2].cp == '\"')
 		out->type = LXR_TOKEN_UTF_8_STRING_LITERAL;
-	if (cp[0].cp == 'u' && cp[1].cp == '\"')
+	if (cps[0].cp == 'u' && cps[1].cp == '\"')
 		out->type = LXR_TOKEN_UTF_16_STRING_LITERAL;
-	if (cp[0].cp == 'U' && cp[1].cp == '\"')
+	if (cps[0].cp == 'U' && cps[1].cp == '\"')
 		out->type = LXR_TOKEN_UTF_32_STRING_LITERAL;
-	if (cp[0].cp == 'L' && cp[1].cp == '\"')
+	if (cps[0].cp == 'L' && cps[1].cp == '\"')
 		out->type = LXR_TOKEN_WCHAR_T_STRING_LITERAL;
 
 	assert(out->type != LXR_TOKEN_INVALID);
@@ -2431,11 +2431,11 @@ err_t lexer_lex_identifier(struct lexer *this,
 		is_start = false;
 	}
 	str = this->buffer + this->begin.lex_pos;
-	for (i = 0; i < (int)ARRAY_SIZE(g_key_word); ++i) {
+	for (i = 0; i < (int)ARRAY_SIZE(g_key_words); ++i) {
 		/* char8_t -> char pointer */
-		if (strncmp(g_key_word[i], str, out->lex_size))
+		if (strncmp(g_key_words[i], str, out->lex_size))
 			continue;
-		if (g_key_word[i][out->lex_size] != NULL_CHAR)
+		if (g_key_words[i][out->lex_size] != NULL_CHAR)
 			continue;
 		out->type += i + 1;
 		return ESUCCESS;
