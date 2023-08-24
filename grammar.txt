@@ -276,7 +276,6 @@ ArrayDeclarator:	DirectDeclarator	[	TypeQualifierList	static	AssignmentExpressio
 ArrayDeclarator:	DirectDeclarator	[	*	]
 ArrayDeclarator:	DirectDeclarator	[	TypeQualifierList	*	]
 
-
 FunctionDeclarator:	DirectDeclarator	(	)
 FunctionDeclarator:	DirectDeclarator	(	ParameterTypeList	)
 
@@ -342,7 +341,6 @@ FunctionAbstractDeclarator:	(	)
 FunctionAbstractDeclarator:	(	ParameterTypeList	)
 FunctionAbstractDeclarator:	DirectAbstractDeclarator	(	)
 FunctionAbstractDeclarator:	DirectAbstractDeclarator	(	ParameterTypeList	)
-
 
 TypedefName:	Identifier
 
@@ -428,7 +426,6 @@ Label:	default	:
 Label:	AttributeSpecifierSequence	Identifier	:
 Label:	AttributeSpecifierSequence	case	ConstantExpression	:
 Label:	AttributeSpecifierSequence	default	:
-
 
 LabeledStatement:	Label	Statement
 

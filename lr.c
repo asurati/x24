@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <stdint.h>
 #include <ctype.h>
 #include <stdbool.h>
 
@@ -121,16 +122,28 @@ struct rule {
 	int	lhs;	/* index into elements to a non-terminal */
 	int	rhs[64];	/* indices into elements */
 	int num_rhs;
-
+#if 0
 	int	first[1024];
 	int	num_firsts;
 	bool	find_first_done;
-
+#endif
 	bool can_generate_epsilon;
 	bool generate_epsilon_done;
 };
 
+/* directed but not necessary acyclic graph */
+struct node {
+	int	index;	/* our own element index */
+	int outgoing[1024];
+	int incoming[1024];
+	int num_outgoing;
+	int	num_incoming;
+	bool	is_on_queue;
+};
+
 struct element {
+	struct node node;
+
 	int	index;
 	bool	is_terminal;
 	const char	*name;
@@ -140,7 +153,6 @@ struct element {
 
 	int	first[1024];
 	int	num_firsts;
-	bool	find_first_done;
 
 	bool can_generate_epsilon;
 	bool generate_epsilon_done;
@@ -148,6 +160,7 @@ struct element {
 
 struct element elements[1024];
 int num_elements;
+
 
 static
 void print_rule(const struct rule *r)
@@ -198,7 +211,6 @@ int find_element(const char *name)
 		if (!strcmp(name, elements[i].name))
 			return i;
 	return -1;
-				
 }
 
 /* Terminals: Identifier, StringLiteral, Constant, epsilon */
@@ -228,9 +240,11 @@ int add_element(const char *name)
 	e->index = num_elements - 1;
 	e->name = name;
 	e->generate_epsilon_done = false;
-	e->find_first_done = false;
 	e->num_rules = 0;
 	e->num_firsts = 0;
+	e->node.index = e->index;
+	e->node.num_incoming = e->node.num_outgoing = 0;
+	e->node.is_on_queue = false;
 	return e->index;
 }
 
@@ -341,104 +355,153 @@ bool add_first(int *first, int *num_firsts,
 	return added;
 }
 
-/* For  rule,
- * e0: e1 e2 e3 ... en
- * first(e0) = first(e1).
- * if e1-can-gen-eps,
- * first(e0) +=  first(e2), etc.
- */
 static
-void find_first()
+void add_edge(struct element *from,
+			  struct element *to)
 {
-	int i, j, k, num_rules_done;
-	bool progress;
-	struct rule *r;
-	struct element *e, *te;
+	int i;
 
-	while (true) {
-		progress = false;
-		for (i = 0; i < num_elements; ++i) {
-			e = &elements[i];
-			if (e->find_first_done)
-				continue;
-			assert(e->num_rules);
-			assert(!e->is_terminal);
-			num_rules_done = 0;
-			for (j = 0; j < e->num_rules; ++j) {
-				r = &e->rules[j];
-				assert(r->lhs == e->index);
-				if (r->find_first_done) {
-					++num_rules_done;
-					continue;
-				}
-
-				/*
-				 * For rule
-				 * e0: e1 e2 e3 ... en
-				 * if e1's find_first is done, then add first(e1).
-				 * if e1's find_first is not done, but e1 can gen epsilon,
-				 * then go to next.
-				 */
-				for (k = 0; k < r->num_rhs; ++k) {
-					te = &elements[r->rhs[k]];
-
-					/* if te==e, only continue to next if we can gen eps. */
-					if (te == e) {
-						if (e->can_generate_epsilon)
-							continue;
-						progress = true;
-						r->find_first_done = true;
-						break;
-					}
-
-					/* If the rules find_first is done, add it */
-					if (te->find_first_done) {
-						/* If newly added, then progress is true */
-						if (add_first(r->first, &r->num_firsts,
-									  te->first, te->num_firsts)) {
-#if 0
-							add_first(e->first, &e->num_firsts,
-									  te->first, te->num_firsts);
-#endif
-							progress = true;
-						}
-						/* If it can generate eps, continue */
-						assert(te->generate_epsilon_done);
-						if (te->can_generate_epsilon)
-							continue;
-						/* If it cannot gen eps, done */
-						progress = true;
-						r->find_first_done = true;
-						break;
-					}
-
-					/*
-					 * ek is not done yet. If ek can gen eps, we can go ahead
-					 * otherwise break with not done yet.
-					 */
-					assert(te->generate_epsilon_done);
-					if (te->can_generate_epsilon)
-						continue;
-					break;
-				}
-				if (r->find_first_done)
-					++num_rules_done;
-			}
-			if (num_rules_done < e->num_rules)
-				continue;
-
-			/* ele can be satisfied */
-			progress = true;
-			e->find_first_done = true;
-			for (j = 0; j < e->num_rules; ++j) {
-				r = &e->rules[j];
-				assert(r->find_first_done);
-				add_first(e->first, &e->num_firsts, r->first, r->num_firsts);
-			}
-		}
-		if (!progress)
+	for (i = 0; i < from->node.num_outgoing; ++i) {
+		if (from->node.outgoing[i] == to->index)
 			break;
 	}
+	if (i == from->node.num_outgoing) {
+		from->node.outgoing[i++] = to->index;
+		from->node.num_outgoing = i;
+	}
+
+	for (i = 0; i < to->node.num_incoming; ++i) {
+		if (to->node.incoming[i] == from->index)
+			break;
+	}
+	if (i == to->node.num_incoming) {
+		to->node.incoming[i++] = from->index;
+		to->node.num_incoming = i;
+	}
+}
+
+/* Terminals won't have any outgoing edges */
+static
+void build_find_first_graph()
+{
+	int i, j, k;
+	struct element *e, *te;
+	struct rule *r;
+
+	for (i = 0; i < num_elements; ++i) {
+		e = &elements[i];
+		if (e->is_terminal)
+			continue;
+		assert(e->num_rules);
+		for (j = 0; j < e->num_rules; ++j) {
+			r = &e->rules[j];
+
+			/*
+			 * e0:e1 e2 e3
+			 * add e0->e1
+			 */
+			assert(r->num_rhs);
+			for (k = 0; k < r->num_rhs; ++k) {
+				te = &elements[r->rhs[k]];
+				if (te == e)
+					continue;
+				add_edge(e, te);
+
+				// if te cannot gen epsilon, done.
+				assert(te->generate_epsilon_done);
+				if (te->can_generate_epsilon == false)
+					break;
+			}
+		}
+	}
+}
+
+struct queue {
+	int queue[1024];
+	int read, num_elements;
+};
+
+static
+void q_add(struct queue *q, struct element *e)
+{
+	int pos;
+
+	if (e->node.is_on_queue)
+		return;
+	e->node.is_on_queue = true;
+	assert(q->num_elements < 1024);
+	pos = (q->read + q->num_elements) % 1024;
+	q->queue[pos] = e->index;
+	++q->num_elements;
+}
+
+static
+int q_rem(struct queue *q)
+{
+	int index;
+	assert(q->num_elements > 0);
+	index = q->queue[q->read];
+	q->read = (q->read + 1) % 1024;
+	--q->num_elements;
+	return index;
+}
+
+static
+void find_first_bfs()
+{
+	int i;
+	static struct queue q;
+	struct element *e, *te;
+	bool res;
+
+	q.read = q.num_elements = 0;
+
+	for (i = 0; i < num_elements; ++i) {
+		e = &elements[i];
+		if (!e->is_terminal)
+			continue;
+		assert(e->node.num_outgoing == 0);
+		//printf("adding %d %s\n", e->index, e->name);
+		q_add(&q, e);
+	}
+
+	while (q.num_elements) {
+		e = &elements[q_rem(&q)];
+		assert(e);
+
+		e->node.is_on_queue = false;
+
+		/* For all nodes for which e has incoming edges, update them */
+		for (i = 0; i < e->node.num_incoming; ++i) {
+			te = &elements[e->node.incoming[i]];
+			if (te == e)
+				continue;
+
+			res = add_first(te->first, &te->num_firsts, e->first,
+							e->num_firsts);
+
+			/* If fresh data added, and te has incoming and te is not on queue,
+			 * place te on q
+			 */
+			if (res && te->node.num_incoming && !te->node.is_on_queue)
+				q_add(&q, te);
+		}
+	}
+}
+
+static
+int cmpfunc(const void *p0, const void *p1)
+{
+	const struct element *e[2];
+#if 0
+	int a[2];
+	a[0] = *(int *)p0;
+	a[1] = *(int *)p1;
+	return a[0] - a[1];
+#endif
+	e[0] = &elements[*(int *)p0];
+	e[1] = &elements[*(int *)p1];
+	return strcmp(e[0]->name, e[1]->name);
 }
 
 int main(int argc, char **argv)
@@ -484,10 +547,8 @@ int main(int argc, char **argv)
 		r = &e->rules[e->num_rules++];
 		r->lhs = lhs;
 		r->num_rhs = 0;
-		r->num_firsts = 0;
 		r->can_generate_epsilon = false;
 		r->generate_epsilon_done = false;
-		r->find_first_done = false;
 		for (; i < len;) {
 			assert(line[i] == '\t');
 			++i;
@@ -534,11 +595,15 @@ int main(int argc, char **argv)
 		if (!e->is_terminal)
 			continue;
 		assert(e->num_rules == 0);
-		e->find_first_done = true;
 		e->num_firsts = 1;
 		e->first[0] = e->index;
 	}
-	find_first();
+	build_find_first_graph();
+	find_first_bfs();
+	for (i = 0; i < num_elements; ++i) {
+		e = &elements[i];
+		qsort(&e->first, e->num_firsts, sizeof(int), cmpfunc);
+	}
 	for (i = 0; i < num_elements; ++i)
 		print_element(i);
 	return err;
