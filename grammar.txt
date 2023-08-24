@@ -27,7 +27,7 @@ PostfixExpression:	PostfixExpression	++
 PostfixExpression:	PostfixExpression	--
 PostfixExpression:	CompoundLiteral
 
-ArgumentExpressionList:	ArgumentExpression
+ArgumentExpressionList:	AssignmentExpression
 ArgumentExpressionList:	ArgumentExpressionList	,	AssignmentExpression
 
 CompoundLiteral:	(	TypeName	)	BracedInitializer
@@ -230,6 +230,8 @@ Enumerator:	EnumerationConstant	AttributeSpecifierSequence
 Enumerator:	EnumerationConstant	=	ConstantExpression
 Enumerator:	EnumerationConstant	AttributeSpecifierSequence	=	ConstantExpression
 
+EnumerationConstant:	Identifier
+
 EnumTypeSpecifier:	:	SpecifierQualifierList
 
 AtomicTypeSpecifier:	_Atomic	(	TypeName	)
@@ -401,7 +403,7 @@ BalancedToken:	{	}
 BalancedToken:	(	BalancedTokenSequence	)
 BalancedToken:	[	BalancedTokenSequence	]
 BalancedToken:	{	BalancedTokenSequence	}
-BalancedToken:	any token other three brackets
+#BalancedToken:	any token other three brackets
 
 # Statement
 
