@@ -328,7 +328,6 @@ bool add_first(int **firsts, int *num_firsts,
 	int *f = *firsts;
 	int nf = *num_firsts;
 
-
 	for (i = 0; i < snum_firsts; ++i) {
 		for (j = 0; j < nf; ++j) {
 			if (f[j] == sfirsts[i])
@@ -491,7 +490,6 @@ int cmpfunc(const void *p0, const void *p1)
  *  if dot_pos == num_rhs then the item is complete and allows reduction.
  *  e0: . e1 e2 e3 e4		[las]
  */
-#if 0
 struct item {
 	int	element;
 	int	rule;
@@ -503,113 +501,151 @@ struct item {
 
 struct item_set {
 	int index;
-	struct array items;
+	struct item *items;
+	int num_items;
 };
 
-struct item_set *set;
+struct item_set *sets;
 int num_sets;
 
-int find_item(const struct item_set *set,
-			  const struct item *item)
+/* ret true if set is modified */
+bool add_item(struct item_set *set,
+			  struct item *item)
 {
 	int i, j, k;
-	const struct item *ti;
+	struct element *e;
+	struct rule *r;
+	struct item  *ti;
+	bool res;
 
+	assert(item->jump == EOF);
 	for (i = 0; i < set->num_items; ++i) {
-		ti = set->items[i];
+		ti = &set->items[i];
+		/* match everything except jump */
 		if (ti->element != item->element)
 			continue;
 		if (ti->rule != item->rule)
 			continue;
 		if (ti->dot_pos != item->dot_pos)
 			continue;
-		if (ti->num_las != item->num_las)
-			continue;
-		for (j = 0; j < ti->num_las; ++j) {
-			for (k = 0; k < item->num_las; ++k) {
-				if (ti->las[j] == item->las[j])
-					break;
-			}
-			if (k == item->num_las)
-				return -1;
-		}
-		return 0;
+		assert(ti->jump != EOF);
+		/* If any la of item is not present in las of ti, then modify */
+		res = add_first(&ti->las, &ti->num_las, item->las, item->num_las);
+		free(item->las);
+		return res;
 	}
-	return -1;
+
+	/* item isn't present at all */
+
+	/* fixup the jump of this item. If necessary, create a new set */
+	assert(item->dot_pos == 0);
+	e = &elements[item->element];
+	r = &e->rules[item->rule];
+	j = r->rhs[item->dot_pos];
+
+	/* Search for other items with the same dot-pos element */
+	for (i = 0; i < set->num_items; ++i) {
+		ti = &set->items[i];
+		e = &elements[ti->element];
+		r = &e->rules[ti->rule];
+		k = r->rhs[ti->dot_pos];
+		if (j == k) {
+			item->jump = ti->jump;
+			break;
+		}
+	}
+	assert(item->jump != EOF);
+	/* Create a new set, and take its closure */
+	if (item->jump == EOF) {
+	}
+	set->items = realloc(set->items, (set->num_items + 1) * sizeof(*item));
+	set->items[set->num_items++] = *item;	/* copy las ptr. */
+	return true;
+}
+
+/* For each item, see if it needs to generate more items. */
+/* return true if we modified the set */
+bool closure_one(struct item_set *set,
+				 struct item *item)
+{
+	int i, j, k;
+	struct item ti;
+	bool added = false, res;
+	struct element *e, *te;
+	struct rule *r;
+
+	e = &elements[item->element];
+	r = &e->rules[item->rule];
+
+	/* If this is a reduce item, skip. */
+	if (item->dot_pos == r->num_rhs)
+		return false;
+
+	/* If the dot-pos rhs item is terminal, skip */
+	i = r->rhs[item->dot_pos];
+	e = &elements[i];
+	if (e->is_terminal)
+		return false;
+
+	/*
+	 * A -> alpha . B			[L]
+	 * A -> alpha . B beta		[L]
+	 */
+
+	/* A -> alpha . B			[L] */
+	if (item->dot_pos == r->num_rhs - 1) {
+		/* We need to add B -> . gamma	[L], for each rule of this ele. */
+		for (i = 0; i < e->num_rules; ++i) {
+			r = &e->rules[i];
+			memset(&ti, 0, sizeof(ti));
+			ti.element = e->index;
+			ti.rule = i;
+			ti.jump = EOF;
+			add_first(&ti.las, &ti.num_las, item->las, item->num_las);
+			res = add_item(set, &ti);
+			if (res)
+				added = true;
+		}
+	} else {
+		assert(item->dot_pos < r->num_rhs - 1);
+
+		/* A -> alpha . B	beta		[L] */
+		i = r->rhs[item->dot_pos + 1];
+		te = &elements[i];
+
+		for (i = 0; i < e->num_rules; ++i) {
+			r = &e->rules[i];
+			memset(&ti, 0, sizeof(ti));
+			ti.element = e->index;
+			ti.rule = i;
+			ti.jump = EOF;
+			assert(te->generate_epsilon_done);
+			add_first(&ti.las, &ti.num_las, te->firsts, te->num_firsts);
+			if (te->can_generate_epsilon)
+				add_first(&ti.las, &ti.num_las, item->las, item->num_las);
+			res = add_item(set, &ti);
+			if (res)
+				added = true;
+		}
+	}
+	return added;
 }
 
 void closure(struct item_set *set)
 {
-	int i, j, k;
+	int i;
+	bool res;
 	bool modified = true;
-	struct item *item, *ti;
-	struct element *e, *te;
-	struct rule *r;
-	int *las;
 
-	for (i = 0; i < set->num_items; ++i) {
-		item = set->items[i];
-		e = &elements[item->element];
-		r = &e->rules[item->rule];
-
-		/* e0: e1 e2 e3 . A reduce item. skip */
-		if (item->dot_pos == r->num_rhs)
-			continue;
-		assert(item->dot_pos >= 0 && item->dot_pos < r->num_rhs);
-		te = &elements[r->rhs[item->dot_pos]];
-		if (te->is_terminal)
-			continue;
-		assert(te->num_rules);
-		ti = malloc(sizeof(*ti));
-		assert(ti);
-		ti->element = te->index;
-		ti->dot_pos = 0;
-		ti->num_las = e->num_las;
-		las = malloc(ti->num_las * sizeof(int));
-		assert(las);
-		memcpy(las, e->las, ti->num_las * sizeof(int));
-
-	int	element;
-	int	rule;
-	int	dot_pos;
-	int *las;	/* look aheads */
-	int num_las;
-		if (item->dot_pos < r->num_rhs - 1) {
-			te = &elements[r->rhs[item->dot_pos + 1]];
-			assert(te->generate_epsilon_done);
-			if (!te->can_generate_epsilon) {
-				free(las);
-				ti->num_las = 0;
-				las = NULL;
-			}
-			ti->num_las += te->num_firsts;
-			las = realloc(las, ti->num_las * sizeof(int));
-			ti->num_las -= te->num_firsts;
-			assert(las);
+	while(modified) {
+		modified = false;
+		for (i = 0; i < set->num_items; ++i) {
+			res = closure_one(set, &set->items[i]);
+			modified = res ? true : modified;
 		}
 	}
 }
 
-/* adds an item and computes the closure. if look_ahead changes, compute */
-void add_item(struct item_set *set,
-			  struct item *item)
-{
-	int i, j;
-	struct item *ti;
-	bool added = false;
-
-	i = find_item(set, item);
-	if (i < 0)
-		goto add;
-	return;
-add:
-	set->items = realloc(set->items, (set->num_items + 1) * sizeof(void *));
-	assert(set->items);
-	set->items[set->num_items++] = item;
-
-	/* closure */
-}
-#endif
 int main(int argc, char **argv)
 {
 	int i, err, j, len, lhs, epsilon;
@@ -618,6 +654,8 @@ int main(int argc, char **argv)
 	struct element *e;
 	struct rule *r;
 	char *str;
+	struct item *item;
+	struct item_set *set;
 
 	if (argc != 2) {
 		fprintf(stderr, "%s: Usage: %s grammar.txt\n", __func__, argv[0]);
@@ -707,5 +745,39 @@ int main(int argc, char **argv)
 	}
 	for (i = 0; i < num_elements; ++i)
 		print_element(i);
+#if 0
+	int	element;
+	int	rule;
+	int	dot_pos;
+	int *las;	/* look aheads */
+	int num_las;
+	int	jump;
+};
+#endif
+	sets = malloc(sizeof(*sets));
+	num_sets = 1;
+	set = &sets[0];
+	set->index = 0;
+	set->num_items = 2;
+	set->items = malloc(2 * sizeof(*item));
+	item = &set->items[0];
+	item->element = find_element("TranslationUnit");
+	item->rule = 0;
+	item->dot_pos = 0;
+	item->las = malloc(sizeof(int));
+	item->las[0] = EOF;
+	item->num_las = 1;
+	item->jump = EOF;
+
+	item = &set->items[1];
+	item->element = find_element("TranslationUnit");
+	item->rule = 1;
+	item->dot_pos = 0;
+	item->las = malloc(sizeof(int));
+	item->las[0] = EOF;
+	item->num_las = 1;
+	item->jump = EOF;
+
+	closure(&sets[0]);
 	return err;
 }
