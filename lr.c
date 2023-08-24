@@ -117,55 +117,40 @@ const char *terminals[] = {
 	"Constant",
 	"epsilon",
 };
-
+///////////////////////////////////////////////////////////////////////////////
 struct rule {
 	int	lhs;	/* index into elements to a non-terminal */
-	int	rhs[64];	/* indices into elements */
-	int num_rhs;
-#if 0
-	int	first[1024];
-	int	num_firsts;
-	bool	find_first_done;
-#endif
+	int	*rhs;
+	int	num_rhs;
 	bool can_generate_epsilon;
 	bool generate_epsilon_done;
 };
 
-/* directed but not necessary acyclic graph */
-struct node {
-	int	index;	/* our own element index */
-	int outgoing[1024];
-	int incoming[1024];
-	int num_outgoing;
+struct element {
+	int	*incoming;	/* edges */
 	int	num_incoming;
 	bool	is_on_queue;
-};
-
-struct element {
-	struct node node;
 
 	int	index;
 	bool	is_terminal;
 	const char	*name;
 
-	struct rule	rules[32];
-	int num_rules;
-
-	int	first[1024];
+	struct rule	*rules;
+	int	num_rules;
+	int	*firsts;
 	int	num_firsts;
 
 	bool can_generate_epsilon;
 	bool generate_epsilon_done;
 };
 
-struct element elements[1024];
+struct element *elements;
 int num_elements;
-
-
+///////////////////////////////////////////////////////////////////////////////
 static
 void print_rule(const struct rule *r)
 {
-	int i;
+	int i, j;
 	const struct element *e;
 
 	e = &elements[r->lhs];
@@ -173,7 +158,8 @@ void print_rule(const struct rule *r)
 		   r->generate_epsilon_done, r->can_generate_epsilon);
 
 	for (i = 0; i < r->num_rhs; ++i) {
-		e = &elements[r->rhs[i]];
+		j = r->rhs[i];
+		e = &elements[j];
 		printf(" %s", e->name);
 	}
 	printf("\n");
@@ -182,20 +168,22 @@ void print_rule(const struct rule *r)
 static
 void print_element(const int index)
 {
-	int i;
+	int i, j;
 	const struct element *e;
 
 	e = &elements[index];
 	if (e->is_terminal)
 		return;
+
 	for (i = 0; i < e->num_rules; ++i)
 		print_rule(&e->rules[i]);
 
 	/* firsts */
 	printf("%s firsts:", e->name);
 	for (i = 0; i < e->num_firsts; ++i) {
-		printf(" %s", elements[e->first[i]].name);
-		if (i != e->num_firsts - 1)
+		j = e->firsts[i];
+		printf(" %s", elements[j].name);
+		if (j != e->num_firsts - 1)
 			printf(",");
 	}
 	printf("\n");
@@ -233,25 +221,20 @@ int add_element(const char *name)
 	i = find_element(name);
 	if (i >= 0)
 		return i;
-
 	/* not found */
+	elements = realloc(elements, (num_elements + 1) * sizeof(*e));
 	e = &elements[num_elements++];
-	e->is_terminal = is_terminal(name);
+	memset(e, 0, sizeof(*e));
 	e->index = num_elements - 1;
+	e->is_terminal = is_terminal(name);
 	e->name = name;
-	e->generate_epsilon_done = false;
-	e->num_rules = 0;
-	e->num_firsts = 0;
-	e->node.index = e->index;
-	e->node.num_incoming = e->node.num_outgoing = 0;
-	e->node.is_on_queue = false;
 	return e->index;
 }
 
 static
 void calc_generate_epsilon()
 {
-	int i, j, k, num_rules_done;
+	int i, j, k, l, num_rules_done;
 	bool progress;
 	struct rule *r;
 	struct element *e, *te;
@@ -279,7 +262,8 @@ void calc_generate_epsilon()
 				 * epsilon.
 				 */
 				for (k = 0; k < r->num_rhs; ++k) {
-					te = &elements[r->rhs[k]];
+					l = r->rhs[k];
+					te = &elements[l];
 					if (!te->generate_epsilon_done)
 						continue;
 					if (te->can_generate_epsilon)
@@ -297,7 +281,8 @@ void calc_generate_epsilon()
 				}
 
 				for (k = 0; k < r->num_rhs; ++k) {
-					te = &elements[r->rhs[k]];
+					l = r->rhs[k];
+					te = &elements[l];
 					if (!te->generate_epsilon_done)
 						break;
 					if (!te->can_generate_epsilon)
@@ -333,25 +318,30 @@ void calc_generate_epsilon()
 			break;
 	}
 }
-
+///////////////////////////////////////////////////////////////////////////////
 static
-bool add_first(int *first, int *num_firsts,
+bool add_first(int **firsts, int *num_firsts,
 			   const int *sfirsts, const int snum_firsts)
 {
 	int i, j;
 	bool added = false;
+	int *f = *firsts;
+	int nf = *num_firsts;
+
 
 	for (i = 0; i < snum_firsts; ++i) {
-		for (j = 0; j < num_firsts[0]; ++j) {
-			if (first[j] == sfirsts[i])
+		for (j = 0; j < nf; ++j) {
+			if (f[j] == sfirsts[i])
 				break;
 		}
-		if (j < num_firsts[0])
+		if (j < nf)
 			continue;
-		assert(num_firsts[0] < 1024);
-		first[num_firsts[0]++] = sfirsts[i];
+		f = realloc(f, (nf + 1) * sizeof(int));
+		f[nf++] = sfirsts[i];
 		added = true;
 	}
+	*firsts = f;
+	*num_firsts = nf;
 	return added;
 }
 
@@ -361,23 +351,14 @@ void add_edge(struct element *from,
 {
 	int i;
 
-	for (i = 0; i < from->node.num_outgoing; ++i) {
-		if (from->node.outgoing[i] == to->index)
+	for (i = 0; i < to->num_incoming; ++i) {
+		if (to->incoming[i] == from->index)
 			break;
 	}
-	if (i == from->node.num_outgoing) {
-		from->node.outgoing[i++] = to->index;
-		from->node.num_outgoing = i;
-	}
-
-	for (i = 0; i < to->node.num_incoming; ++i) {
-		if (to->node.incoming[i] == from->index)
-			break;
-	}
-	if (i == to->node.num_incoming) {
-		to->node.incoming[i++] = from->index;
-		to->node.num_incoming = i;
-	}
+	if (i < to->num_incoming)
+		return;
+	to->incoming = realloc(to->incoming, (to->num_incoming + 1) * sizeof(int));
+	to->incoming[to->num_incoming++] = from->index;
 }
 
 /* Terminals won't have any outgoing edges */
@@ -426,9 +407,9 @@ void q_add(struct queue *q, struct element *e)
 {
 	int pos;
 
-	if (e->node.is_on_queue)
+	if (e->is_on_queue)
 		return;
-	e->node.is_on_queue = true;
+	e->is_on_queue = true;
 	assert(q->num_elements < 1024);
 	pos = (q->read + q->num_elements) % 1024;
 	q->queue[pos] = e->index;
@@ -439,10 +420,13 @@ static
 int q_rem(struct queue *q)
 {
 	int index;
+	struct element *e;
 	assert(q->num_elements > 0);
 	index = q->queue[q->read];
 	q->read = (q->read + 1) % 1024;
 	--q->num_elements;
+	e = &elements[index];
+	e->is_on_queue = false;
 	return index;
 }
 
@@ -460,7 +444,6 @@ void find_first_bfs()
 		e = &elements[i];
 		if (!e->is_terminal)
 			continue;
-		assert(e->node.num_outgoing == 0);
 		//printf("adding %d %s\n", e->index, e->name);
 		q_add(&q, e);
 	}
@@ -469,26 +452,24 @@ void find_first_bfs()
 		e = &elements[q_rem(&q)];
 		assert(e);
 
-		e->node.is_on_queue = false;
-
 		/* For all nodes for which e has incoming edges, update them */
-		for (i = 0; i < e->node.num_incoming; ++i) {
-			te = &elements[e->node.incoming[i]];
+		for (i = 0; i < e->num_incoming; ++i) {
+			te = &elements[e->incoming[i]];
 			if (te == e)
 				continue;
 
-			res = add_first(te->first, &te->num_firsts, e->first,
+			res = add_first(&te->firsts, &te->num_firsts, e->firsts,
 							e->num_firsts);
 
 			/* If fresh data added, and te has incoming and te is not on queue,
 			 * place te on q
 			 */
-			if (res && te->node.num_incoming && !te->node.is_on_queue)
+			if (res && te->num_incoming && !te->is_on_queue)
 				q_add(&q, te);
 		}
 	}
 }
-
+///////////////////////////////////////////////////////////////////////////////
 static
 int cmpfunc(const void *p0, const void *p1)
 {
@@ -503,7 +484,132 @@ int cmpfunc(const void *p0, const void *p1)
 	e[1] = &elements[*(int *)p1];
 	return strcmp(e[0]->name, e[1]->name);
 }
+///////////////////////////////////////////////////////////////////////////////
+/*
+ *  lr1 dotted item
+ *  For a rule, num_rhs = 4, item starts at dot_pos == 0.
+ *  if dot_pos == num_rhs then the item is complete and allows reduction.
+ *  e0: . e1 e2 e3 e4		[las]
+ */
+#if 0
+struct item {
+	int	element;
+	int	rule;
+	int	dot_pos;
+	int *las;	/* look aheads */
+	int num_las;
+	int	jump;
+};
 
+struct item_set {
+	int index;
+	struct array items;
+};
+
+struct item_set *set;
+int num_sets;
+
+int find_item(const struct item_set *set,
+			  const struct item *item)
+{
+	int i, j, k;
+	const struct item *ti;
+
+	for (i = 0; i < set->num_items; ++i) {
+		ti = set->items[i];
+		if (ti->element != item->element)
+			continue;
+		if (ti->rule != item->rule)
+			continue;
+		if (ti->dot_pos != item->dot_pos)
+			continue;
+		if (ti->num_las != item->num_las)
+			continue;
+		for (j = 0; j < ti->num_las; ++j) {
+			for (k = 0; k < item->num_las; ++k) {
+				if (ti->las[j] == item->las[j])
+					break;
+			}
+			if (k == item->num_las)
+				return -1;
+		}
+		return 0;
+	}
+	return -1;
+}
+
+void closure(struct item_set *set)
+{
+	int i, j, k;
+	bool modified = true;
+	struct item *item, *ti;
+	struct element *e, *te;
+	struct rule *r;
+	int *las;
+
+	for (i = 0; i < set->num_items; ++i) {
+		item = set->items[i];
+		e = &elements[item->element];
+		r = &e->rules[item->rule];
+
+		/* e0: e1 e2 e3 . A reduce item. skip */
+		if (item->dot_pos == r->num_rhs)
+			continue;
+		assert(item->dot_pos >= 0 && item->dot_pos < r->num_rhs);
+		te = &elements[r->rhs[item->dot_pos]];
+		if (te->is_terminal)
+			continue;
+		assert(te->num_rules);
+		ti = malloc(sizeof(*ti));
+		assert(ti);
+		ti->element = te->index;
+		ti->dot_pos = 0;
+		ti->num_las = e->num_las;
+		las = malloc(ti->num_las * sizeof(int));
+		assert(las);
+		memcpy(las, e->las, ti->num_las * sizeof(int));
+
+	int	element;
+	int	rule;
+	int	dot_pos;
+	int *las;	/* look aheads */
+	int num_las;
+		if (item->dot_pos < r->num_rhs - 1) {
+			te = &elements[r->rhs[item->dot_pos + 1]];
+			assert(te->generate_epsilon_done);
+			if (!te->can_generate_epsilon) {
+				free(las);
+				ti->num_las = 0;
+				las = NULL;
+			}
+			ti->num_las += te->num_firsts;
+			las = realloc(las, ti->num_las * sizeof(int));
+			ti->num_las -= te->num_firsts;
+			assert(las);
+		}
+	}
+}
+
+/* adds an item and computes the closure. if look_ahead changes, compute */
+void add_item(struct item_set *set,
+			  struct item *item)
+{
+	int i, j;
+	struct item *ti;
+	bool added = false;
+
+	i = find_item(set, item);
+	if (i < 0)
+		goto add;
+	return;
+add:
+	set->items = realloc(set->items, (set->num_items + 1) * sizeof(void *));
+	assert(set->items);
+	set->items[set->num_items++] = item;
+
+	/* closure */
+}
+#endif
 int main(int argc, char **argv)
 {
 	int i, err, j, len, lhs, epsilon;
@@ -544,11 +650,10 @@ int main(int argc, char **argv)
 		e = &elements[lhs];
 		assert(e->index == lhs);
 		assert(e->is_terminal == false);
+		e->rules = realloc(e->rules, (e->num_rules + 1) * sizeof(*r));
 		r = &e->rules[e->num_rules++];
+		memset(r, 0, sizeof(*r));
 		r->lhs = lhs;
-		r->num_rhs = 0;
-		r->can_generate_epsilon = false;
-		r->generate_epsilon_done = false;
 		for (; i < len;) {
 			assert(line[i] == '\t');
 			++i;
@@ -562,7 +667,7 @@ int main(int argc, char **argv)
 			str = calloc(i - j + 1, sizeof(char));
 			str[i - j] = 0;
 			memcpy(str, &line[j], i - j);
-			j = add_element(str);
+			r->rhs = realloc(r->rhs, (r->num_rhs + 1) * sizeof(int));
 			r->rhs[r->num_rhs++] = add_element(str);
 		}
 	}
@@ -585,24 +690,20 @@ int main(int argc, char **argv)
 	 * It turns out that only AttributeList (and perhaps BalancedTOken)
 	 * can generate epsilon.
 	 */
-#if 0
-	for (i = 0; i < num_elements; ++i)
-		print_element(i);
-#endif
 	/* All terminals */
 	for (i = 0; i < num_elements; ++i) {
 		e = &elements[i];
 		if (!e->is_terminal)
 			continue;
 		assert(e->num_rules == 0);
-		e->num_firsts = 1;
-		e->first[0] = e->index;
+		e->firsts = realloc(e->firsts, (e->num_firsts + 1) * sizeof(int));
+		e->firsts[e->num_firsts++] = e->index;
 	}
 	build_find_first_graph();
 	find_first_bfs();
 	for (i = 0; i < num_elements; ++i) {
 		e = &elements[i];
-		qsort(&e->first, e->num_firsts, sizeof(int), cmpfunc);
+		qsort(e->firsts, e->num_firsts, sizeof(int), cmpfunc);
 	}
 	for (i = 0; i < num_elements; ++i)
 		print_element(i);
