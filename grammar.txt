@@ -1,4 +1,6 @@
-# TranslationUnit must be first
+# augmented grammar. TranslationObject must be first.
+TranslationObject:	TranslationUnit
+
 TranslationUnit:	ExternalDeclaration
 TranslationUnit:	TranslationUnit	ExternalDeclaration
 
