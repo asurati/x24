@@ -775,11 +775,15 @@ void closure(struct item_set *set)
 		modified = false;
 		for (i = 0; i < set->num_kernels; ++i) {
 			item = set->kernels[i];
+#if 0
 			printf("%s: taking closure of item: ", __func__);
 			print_item(item);
+#endif
 			res = closure_one(set, item);
 			modified = res ? true : modified;
+#if 0
 			printf("%s: closure returned %d\n", __func__, res);
+#endif
 		}
 		if (modified == false)
 			break;
@@ -790,11 +794,15 @@ void closure(struct item_set *set)
 		modified = false;
 		for (i = 0; i < set->num_items; ++i) {
 			item = set->items[i];
+#if 0
 			printf("%s: taking closure of item: ", __func__);
 			print_item(item);
+#endif
 			res = closure_one(set, item);
 			modified = res ? true : modified;
+#if 0
 			printf("%s: closure returned %d\n", __func__, res);
+#endif
 		}
 		if (modified == false)
 			break;
