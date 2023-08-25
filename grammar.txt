@@ -372,9 +372,9 @@ StaticAssertDeclaration:	static_assert	(	ConstantExpression	)	;
 AttributeSpecifierSequence:	AttributeSpecifier
 AttributeSpecifierSequence:	AttributeSpecifierSequence	AttributeSpecifier
 
+AttributeSpecifier:	[	[	]	]
 AttributeSpecifier:	[	[	AttributeList	]	]
 
-AttributeList:	epsilon
 AttributeList:	Attribute
 AttributeList:	AttributeList	,
 AttributeList:	AttributeList	,	Attribute
