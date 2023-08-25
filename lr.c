@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2023 Amol Surati
+// vim: set noet ts=4 sts=4 sw=4:
 
+// cc -O3 -Wall -Wextra lr.c
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -116,9 +118,6 @@ const char *terminals[] = {
 	"StringLiteral",
 	"Constant",
 	"epsilon",
-	/* For testing a small grammar */
-	"c",
-	"d",
 };
 ///////////////////////////////////////////////////////////////////////////////
 struct rule {
@@ -883,6 +882,7 @@ void closure(struct item_set *set)
 				free(item->las);
 				free(item);
 			}
+			free(nset->kernels);
 			free(nset);
 			nset = sets[i];
 		}
@@ -911,6 +911,46 @@ void closure(struct item_set *set)
 	}
 }
 
+static
+void cleanup()
+{
+	int i, j;
+	struct item_set *set;
+	struct item  *item;
+	struct element *e;
+	struct rule *r;
+
+	for (i = 0; i < num_sets; ++i) {
+		set = sets[i];
+		for (j = 0; j < set->num_kernels; ++j) {
+			item = set->kernels[j];
+			free(item->las);
+			free(item);
+		}
+		free(set->kernels);
+		for (j = 0; j < set->num_items; ++j) {
+			item = set->items[j];
+			free(item->las);
+			free(item);
+		}
+		free(set->items);
+		free(set);
+	}
+	free(sets);
+
+	for (i = 0; i < num_elements; ++i) {
+		e = &elements[i];
+		for (j = 0; j < e->num_rules; ++j) {
+			r = &e->rules[j];
+			free(r->rhs);
+		}
+		free(e->name);
+		free(e->rules);
+		free(e->firsts);
+		free(e->incoming);
+	}
+	free(elements);
+}
 int main(int argc, char **argv)
 {
 	int i, err, j, len, lhs, epsilon;
@@ -951,6 +991,8 @@ int main(int argc, char **argv)
 
 		lhs = add_element(str);
 		e = &elements[lhs];
+		if (e->name != str)
+			free(str);
 		assert(e->index == lhs);
 		assert(e->is_terminal == false);
 		e->rules = realloc(e->rules, (e->num_rules + 1) * sizeof(*r));
@@ -971,7 +1013,9 @@ int main(int argc, char **argv)
 			str[i - j] = 0;
 			memcpy(str, &line[j], i - j);
 			r->rhs = realloc(r->rhs, (r->num_rhs + 1) * sizeof(int));
-			r->rhs[r->num_rhs++] = add_element(str);
+			r->rhs[r->num_rhs++] = j = add_element(str);
+			if (elements[j].name != str)
+				free(str);
 		}
 	}
 	fclose(file);
@@ -1004,10 +1048,12 @@ int main(int argc, char **argv)
 	}
 	build_find_first_graph();
 	find_first_bfs();
+#if 0
 	for (i = 0; i < num_elements; ++i) {
 		e = &elements[i];
 		qsort(e->firsts, e->num_firsts, sizeof(int), cmpfunc);
 	}
+#endif
 #if 0
 	for (i = 0; i < num_elements; ++i)
 		print_element(i);
@@ -1024,6 +1070,7 @@ int main(int argc, char **argv)
 	item->jump = EOF;	/* No need to jump */
 	item_set_add_kernel(set, item);
 	closure(set);
-	print_item_sets();
+	//print_item_sets();
+	cleanup();
 	return err;
 }
