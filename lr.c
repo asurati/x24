@@ -502,14 +502,85 @@ struct item {
 	int	jump;
 };
 
+/* With **items, reallocating items does not invalidate pointers to items. */
+/* Each item_set is identified by the set of its kernel items
+ * two item_sets with the same set of kernel items are identical
+ */
 struct item_set {
 	int index;
-	struct item *items;
+	struct item **kernels;	/* The initial + all items with dot_pos != 0 */
+	int num_kernels;
+	struct item **items;	/* Closure items. All have dot_pos == 0 */
 	int num_items;
 };
 
-struct item_set *sets;
+struct item_set **sets;
 int num_sets;
+
+
+/* During closure, we can match the items by excluding the las from teh
+ * comparison and then adding the las into the found item.
+ * During goto, we must match kernel items exactly - number, productions and
+ * las.
+ */
+static
+bool item_set_add_item(struct item_set *set,
+					   struct item *item)
+{
+	int i;
+	bool res;
+	struct item *ti;
+
+	for (i = 0; i < set->num_items; ++i) {
+		ti = set->items[i];
+		if (ti->element != item->element)
+			continue;
+		if (ti->rule != item->rule)
+			continue;
+		if (ti->dot_pos != item->dot_pos)
+			continue;
+
+		/* For closure items, we do not need to match the las. */
+		/*
+		 * If there's any ele from item.las, that is missing in ti.las,
+		 * add it into ti.las.
+		 */
+		res = add_first(&ti->las, &ti->num_las, item->las, item->num_las);
+		free(item->las);
+		free(item);
+		return res;
+	}
+	/* item isn't present at all */
+	set->items = realloc(set->items, (set->num_items + 1) * sizeof(item));
+	set->items[set->num_items++] = item;
+	return true;
+}
+
+static
+bool item_set_add_kernel(struct item_set *set,
+						 struct item *item)
+{
+	int i;
+	struct item *ti;
+
+	/* We must not find the item being added */
+	for (i = 0; i < set->num_kernels; ++i) {
+		ti = set->kernels[i];
+		if (ti->element != item->element)
+			continue;
+		if (ti->rule != item->rule)
+			continue;
+		if (ti->dot_pos != item->dot_pos)
+			continue;
+		assert(0);
+		return true;
+	}
+	/* item isn't present at all */
+	set->kernels = realloc(set->kernels,
+						   (set->num_kernels + 1) * sizeof(item));
+	set->kernels[set->num_kernels++] = item;
+	return true;
+}
 
 static
 void print_item(const struct item *item)
@@ -521,7 +592,7 @@ void print_item(const struct item *item)
 	e = &elements[item->element];
 	r = &e->rules[item->rule];
 	assert(r->lhs == e->index);
-	printf("%s ->", e->name);
+	printf("[%s ->", e->name);
 
 	for (i = 0; i < r->num_rhs; ++i) {
 		j = r->rhs[i];
@@ -532,7 +603,7 @@ void print_item(const struct item *item)
 	}
 	if (item->dot_pos == i)
 		printf(" .");
-	printf(" las:");
+	printf("] jump=%d las:", item->jump);
 	for (i = 0; i < item->num_las; ++i) {
 		j = item->las[i];
 		if (j == EOF) {
@@ -542,39 +613,86 @@ void print_item(const struct item *item)
 		e = &elements[j];
 		printf(" %s", e->name);
 	}
+
 	printf("\n");
 }
 
-/* ret true if set is modified */
 static
-bool add_item(struct item_set *set,
-			  struct item *item)
+void print_item_set(const struct item_set *set)
 {
 	int i;
-	struct item  *ti;
-	bool res;
 
-	assert(item->jump == EOF);
-	for (i = 0; i < set->num_items; ++i) {
-		ti = &set->items[i];
-		/* match everything except jump */
-		if (ti->element != item->element)
+	printf("%s: item-set[%4d]:k----------------------\n", __func__,
+		   set->index);
+	for (i = 0; i < set->num_kernels; ++i)
+		print_item(set->kernels[i]);
+	if (set->num_items)
+		printf("%s: item-set[%4d]:-----------------------\n", __func__,
+			   set->index);
+	for (i = 0; i < set->num_items; ++i)
+		print_item(set->items[i]);
+	printf("%s: item-set[%4d]:done-------------------\n", __func__, set->index);
+	printf("\n");
+}
+
+static
+void print_item_sets()
+{
+	int i;
+
+	for (i = 0; i < num_sets; ++i)
+		print_item_set(sets[i]);
+}
+
+static
+int find_item_set(const struct item_set *set)
+{
+	int i, j, num_items_matched, k, m, n, num_las_matched;
+	const struct item_set *s;
+	struct item  *item[2];
+
+	/* All must match exactly */
+	for (i = 0; i < num_sets; ++i) {
+		s = sets[i];
+		if (s->num_kernels != set->num_kernels)
 			continue;
-		if (ti->rule != item->rule)
+		/* Does the kernels have the same items */
+		num_items_matched = 0;
+		for (j = 0; j < set->num_kernels; ++j) {
+			item[0] = set->kernels[j];
+			/* Search item[0] in s */
+			for (k = 0; k < s->num_kernels; ++k) {
+				item[1] = s->kernels[k];
+				if (item[0]->element != item[1]->element)
+					continue;
+				if (item[0]->rule != item[1]->rule)
+					continue;
+				if (item[0]->dot_pos != item[1]->dot_pos)
+					continue;
+				if (item[0]->num_las != item[1]->num_las)
+					continue;
+				num_las_matched = 0;
+				for (m = 0; m < item[0]->num_las; ++m) {
+					for (n = 0; n < item[1]->num_las; ++n) {
+						if (item[0]->las[m] != item[1]->las[n])
+							continue;
+						++num_las_matched;
+						break;
+					}
+				}
+				if (num_las_matched != item[0]->num_las)
+					continue;
+				/* a full item was matched */
+				++num_items_matched;
+				break;
+			}
+		}
+		if (num_items_matched != set->num_kernels)
 			continue;
-		if (ti->dot_pos != item->dot_pos)
-			continue;
-		/* Same item found */
-		/* If any la of item is not present in las of ti, then modify */
-		res = add_first(&ti->las, &ti->num_las, item->las, item->num_las);
-		free(item->las);
-		return res;
+		/* Full set was matched */
+		return i;
 	}
-
-	/* item isn't present at all */
-	set->items = realloc(set->items, (set->num_items + 1) * sizeof(*item));
-	set->items[set->num_items++] = *item;	/* copy las ptr. */
-	return true;
+	return EOF;
 }
 
 /* For each item, see if it needs to generate more items. */
@@ -583,7 +701,7 @@ bool closure_one(struct item_set *set,
 				 struct item *item)
 {
 	int i;
-	struct item ti;
+	struct item *ti;
 	bool added = false;
 	struct element *e, *te;
 	struct rule *r;
@@ -611,12 +729,12 @@ bool closure_one(struct item_set *set,
 		/* We need to add B -> . gamma	[L], for each rule of this ele. */
 		/* e points to B */
 		for (i = 0; i < e->num_rules; ++i) {
-			memset(&ti, 0, sizeof(ti));
-			ti.element = e->index;
-			ti.rule = i;
-			ti.jump = EOF;
-			add_first(&ti.las, &ti.num_las, item->las, item->num_las);
-			if (add_item(set, &ti))
+			ti = calloc(1, sizeof(*ti));
+			ti->element = e->index;
+			ti->rule = i;
+			ti->jump = EOF;
+			add_first(&ti->las, &ti->num_las, item->las, item->num_las);
+			if (item_set_add_item(set, ti))
 				added = true;
 		}
 		return added;
@@ -629,15 +747,15 @@ bool closure_one(struct item_set *set,
 
 	/* e points to B, te points to beta */
 	for (i = 0; i < e->num_rules; ++i) {
-		memset(&ti, 0, sizeof(ti));
-		ti.element = e->index;
-		ti.rule = i;
-		ti.jump = EOF;
+		ti = calloc(1, sizeof(*ti));
+		ti->element = e->index;
+		ti->rule = i;
+		ti->jump = EOF;
 		assert(te->generate_epsilon_done);
-		add_first(&ti.las, &ti.num_las, te->firsts, te->num_firsts);
+		add_first(&ti->las, &ti->num_las, te->firsts, te->num_firsts);
 		if (te->can_generate_epsilon)
-			add_first(&ti.las, &ti.num_las, item->las, item->num_las);
-		if (add_item(set, &ti))
+			add_first(&ti->las, &ti->num_las, item->las, item->num_las);
+		if (item_set_add_item(set, ti))
 			added = true;
 	}
 	return added;
@@ -645,33 +763,143 @@ bool closure_one(struct item_set *set,
 
 void closure(struct item_set *set)
 {
-	int i, num_items;
-	bool res, modified;
-	struct item ti;
+	int i, num_items, j, k, added;
+	bool res, modified, items_modified;
+	struct item *ti, *item;
+	struct element *e;
+	struct rule *r;
+	struct item_set *nset;
 
+	items_modified = false;
 	while (true) {
 		modified = false;
-		num_items = set->num_items;	/* add_item changes this var */
-		for (i = 0; i < num_items; ++i) {
-			ti = set->items[i];
-			/*
-			 * add_items reallocs item arra. So closure_one can have problems
-			 * accessing item if &set->item[i] is passed. Instead, make a copy.
-			 */
-			res = closure_one(set, &ti);
+		for (i = 0; i < set->num_kernels; ++i) {
+			item = set->kernels[i];
+			printf("%s: taking closure of item: ", __func__);
+			print_item(item);
+			res = closure_one(set, item);
 			modified = res ? true : modified;
+			printf("%s: closure returned %d\n", __func__, res);
 		}
-		if (modified)
-			continue;
+		if (modified == false)
+			break;
+		items_modified = true;
+	}
+
+	while (items_modified) {
+		modified = false;
 		for (i = 0; i < set->num_items; ++i) {
-			print_item(&set->items[i]);
+			item = set->items[i];
+			printf("%s: taking closure of item: ", __func__);
+			print_item(item);
+			res = closure_one(set, item);
+			modified = res ? true : modified;
+			printf("%s: closure returned %d\n", __func__, res);
 		}
-		exit(0);
-		assert(0);
-		/*
-		 * if modified, fix the jumps for each item
-		 * exlucding set[0].item[0] (TranslationObject item)
-		 */
+		if (modified == false)
+			break;
+	}
+	//print_item_set(set);
+
+	/* process gotos */
+	/* Build an item_set with kernel items and then search */
+	while (true) {
+		num_items = 0;
+		/* Are there any non-reduction items with unresolved jumps */
+		for (i = 0; i < set->num_kernels; ++i) {
+			item = set->kernels[i];
+			e = &elements[item->element];
+			r = &e->rules[item->rule];
+			if (item->dot_pos == r->num_rhs)
+				continue;
+			if (item->jump != EOF)
+				continue;
+			++num_items;
+		}
+		for (i = 0; i < set->num_items; ++i) {
+			item = set->items[i];
+			e = &elements[item->element];
+			r = &e->rules[item->rule];
+			if (item->dot_pos == r->num_rhs)
+				continue;
+			if (item->jump != EOF)
+				continue;
+			++num_items;
+		}
+		if (num_items == 0)
+			break;
+
+		/* Find all items with same dot-pos-ele and jump == EOF */
+		k = -1;
+		nset = calloc(1, sizeof(*nset));
+		for (i = 0; i < set->num_kernels + set->num_items; ++i) {
+			if (i < set->num_kernels)
+				item = set->kernels[i];
+			else
+				item = set->items[i - set->num_kernels];
+			e = &elements[item->element];
+			r = &e->rules[item->rule];
+			if (item->dot_pos == r->num_rhs)	/* skip reduction items */
+				continue;
+			if (item->jump != EOF)	/* skip items with valid jumps */
+				continue;
+			j = item->dot_pos;
+			if (k < 0)
+				k = r->rhs[j];	/* k is the dot-pos element */
+			else if (r->rhs[j] != k)
+				continue;
+
+			/* Collect all items with this dot-pos elemeent */
+			assert(r->rhs[j] == k);
+			ti = calloc(1, sizeof(*ti));
+			*ti = *item;
+			++ti->dot_pos;
+			ti->las = malloc(item->num_las * sizeof(int));
+			memcpy(ti->las, item->las, item->num_las * sizeof(int));
+			res = item_set_add_kernel(nset, ti);
+			assert(res);	/* ti must not be found */
+		}
+		assert(nset->num_kernels);
+
+		/* find the set matching the kernel */
+		added = false;
+		i = find_item_set(nset);
+		if (i < 0) {
+			sets = realloc(sets, (num_sets + 1) * sizeof(nset));
+			sets[num_sets++] = nset;
+			nset->index = num_sets - 1;
+			added = true;
+		} else {
+			for (j = 0; j < nset->num_kernels; ++j) {
+				item = nset->kernels[j];
+				free(item->las);
+				free(item);
+			}
+			free(nset);
+			nset = sets[i];
+		}
+
+		/* Fix up the jumps. */
+		for (i = 0; i < set->num_kernels + set->num_items; ++i) {
+			if (i < set->num_kernels)
+				item = set->kernels[i];
+			else
+				item = set->items[i - set->num_kernels];
+			e = &elements[item->element];
+			r = &e->rules[item->rule];
+			if (item->dot_pos == r->num_rhs)	/* skip reduction items */
+				continue;
+			if (item->jump != EOF)	/* skip items with valid jumps */
+				continue;
+			j = item->dot_pos;
+			if (r->rhs[j] != k)
+				continue;
+			/* Fixup all items with this dot-pos elemeent */
+			assert(r->rhs[j] == k);
+			item->jump = nset->index;
+		}
+		if (added)
+			closure(nset);
 	}
 }
 
@@ -776,19 +1004,18 @@ int main(int argc, char **argv)
 	for (i = 0; i < num_elements; ++i)
 		print_element(i);
 #endif
-	set = sets = malloc(sizeof(*sets));
 	num_sets = 1;
-	set->index = 0;
-	set->num_items = 1;
-	set->items = malloc(sizeof(*item));
-	item = &set->items[0];
+	sets = malloc(num_sets * sizeof(set));
+	set = calloc(1, sizeof(*set));
+	sets[0] = set;
+	item = calloc(1, sizeof(*item));
 	item->element = find_element("TranslationObject");
-	item->rule = 0;
-	item->dot_pos = 0;
 	item->las = malloc(sizeof(int));
 	item->las[0] = EOF;
 	item->num_las = 1;
 	item->jump = EOF;	/* No need to jump */
+	item_set_add_kernel(set, item);
 	closure(set);
+	print_item_sets();
 	return err;
 }
