@@ -2165,9 +2165,9 @@ err_t lexer_lex_single_char(struct lexer *this,
 	case ']': out->type = LXR_TOKEN_RIGHT_BRACKET;	break;
 	case '}': out->type = LXR_TOKEN_RIGHT_BRACE;	break;
 
-	case '?': out->type = LXR_TOKEN_QUESTION_MARK;	break;
+	case '?': out->type = LXR_TOKEN_CONDITIONAL;	break;
 	case ';': out->type = LXR_TOKEN_SEMI_COLON;		break;
-	case '~': out->type = LXR_TOKEN_TILDE;			break;
+	case '~': out->type = LXR_TOKEN_BITWISE_NOT;	break;
 	case ',': out->type = LXR_TOKEN_COMMA;			break;
 	case '@': out->type = LXR_TOKEN_AT;				break;
 	default: return EINVAL;
@@ -2187,7 +2187,7 @@ err_t lexer_lex_not(struct lexer *this,
 	if (err)
 		return err;
 	lexer_consume_code_point(this, &cp);
-	out->type = LXR_TOKEN_EXCLAMATION_MARK;
+	out->type = LXR_TOKEN_LOGICAL_NOT;
 	out->lex_size += cp.cp_size;
 
 	err = lexer_peek_code_point(this, &cp);

@@ -967,11 +967,11 @@ err_t rpn_stack_evaluate(struct queue *this,
 			value[1] = -(intmax_t)value[1];
 			operand[1]->type = RPN_STACK_ENTRY_SIGNED;
 			break;
-		case LXR_TOKEN_EXCLAMATION_MARK:
+		case LXR_TOKEN_LOGICAL_NOT:
 			value[1] = !value[1];
 			operand[1]->type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
-		case LXR_TOKEN_TILDE:
+		case LXR_TOKEN_BITWISE_NOT:
 			value[1] = ~value[1];
 			operand[1]->type = RPN_STACK_ENTRY_SIGNED;
 			break;
@@ -981,8 +981,8 @@ err_t rpn_stack_evaluate(struct queue *this,
 
 		switch (operator) {
 		case LXR_TOKEN_UNARY_MINUS:
-		case LXR_TOKEN_EXCLAMATION_MARK:
-		case LXR_TOKEN_TILDE:
+		case LXR_TOKEN_LOGICAL_NOT:
+		case LXR_TOKEN_BITWISE_NOT:
 			operand[1]->u.value = value[1];
 			err = stack_push(&result, operand[1]);
 			if (err)
@@ -997,7 +997,7 @@ err_t rpn_stack_evaluate(struct queue *this,
 		value[0] = operand[0]->u.value;
 		sign[0] = rpn_stack_entry_sign(operand[0]);
 
-		if (operator == LXR_TOKEN_QUESTION_MARK) {
+		if (operator == LXR_TOKEN_CONDITIONAL) {
 			num_question_marks = 1;
 			/*
 			 * op[0] has the initial condition, op[1] has the value when op[0]
@@ -1022,7 +1022,7 @@ err_t rpn_stack_evaluate(struct queue *this,
 					num_question_marks == 1)
 					break;
 				stack_pop(this);
-				if (entry->u.operator == LXR_TOKEN_QUESTION_MARK)
+				if (entry->u.operator == LXR_TOKEN_CONDITIONAL)
 					++num_question_marks;
 				else if (entry->u.operator == LXR_TOKEN_COLON)
 					--num_question_marks;
@@ -1329,8 +1329,8 @@ err_t cpp_tokens_to_rpn(struct queue *this,
 
 			/* Unary operators */
 			if (operator == LXR_TOKEN_MINUS ||
-				operator == LXR_TOKEN_EXCLAMATION_MARK ||
-				operator == LXR_TOKEN_TILDE) {
+				operator == LXR_TOKEN_LOGICAL_NOT ||
+				operator == LXR_TOKEN_BITWISE_NOT) {
 				if (operator == LXR_TOKEN_MINUS)
 					operator = LXR_TOKEN_UNARY_MINUS;
 				err = rpn_stack_push_operator(&op_stk, out, operator);
@@ -1398,7 +1398,7 @@ err_t cpp_tokens_to_rpn(struct queue *this,
 		if (i == (int)ARRAY_SIZE(g_rpn_operator_precedence))
 			return EINVAL;
 		/* The colon for question-mark is expected when in state 1 */
-		if (operator == LXR_TOKEN_QUESTION_MARK) {
+		if (operator == LXR_TOKEN_CONDITIONAL) {
 			++num_question_marks;
 		} else if (operator == LXR_TOKEN_COLON) {
 			assert(num_question_marks);

@@ -161,8 +161,8 @@ struct rpn_operator_precedence {
 /* only binary ops */
 static const struct rpn_operator_precedence g_rpn_operator_precedence[] = {
 	{LXR_TOKEN_UNARY_MINUS,	0},
-	{LXR_TOKEN_TILDE,	0},
-	{LXR_TOKEN_EXCLAMATION_MARK,	0},
+	{LXR_TOKEN_BITWISE_NOT,	0},
+	{LXR_TOKEN_LOGICAL_NOT,	0},
 
 	{LXR_TOKEN_MUL,			1},
 	{LXR_TOKEN_DIV,			1},
@@ -192,7 +192,7 @@ static const struct rpn_operator_precedence g_rpn_operator_precedence[] = {
 
 	{LXR_TOKEN_LOGICAL_OR,	10},
 
-	{LXR_TOKEN_QUESTION_MARK,	11},
+	{LXR_TOKEN_CONDITIONAL,	11},
 
 	/* Colon is treated as right-associative */
 	{LXR_TOKEN_COLON,	12},
