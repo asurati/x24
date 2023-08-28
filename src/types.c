@@ -62,6 +62,40 @@ char *strdup(const char *str)
 }
 /*****************************************************************************/
 static
+err_t int_array_realloc(struct int_array *this)
+{
+	size_t size;
+
+	this->num_entries += 16;
+	size = this->num_entries * sizeof(int);
+	this->entries = realloc(this->entries, size);
+	if (this->entries == NULL)
+		return ENOMEM;
+	size = 16 * sizeof(int);
+	memset(&this->entries[this->num_entries - 16], 0, size);
+	return ESUCCESS;
+}
+
+err_t int_array_add_entry(struct int_array *this,
+						  const int entry)
+{
+	err_t err;
+	int i;
+	void *e;
+
+	array_for_each(this, i, e) {
+		if (e)
+			continue;
+		this->entries[i] = entry;
+		return ESUCCESS;
+	}
+	err = array_realloc(this);
+	if (!err)
+		err = array_add_entry(this, entry);
+	return err;
+}
+/*****************************************************************************/
+static
 err_t array_realloc(struct array *this)
 {
 	size_t size;

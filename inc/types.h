@@ -21,6 +21,94 @@ char	*strdup(const char *str);
 
 #define ARRAY_SIZE(a)	(sizeof(a) / sizeof((a)[0]))
 /*****************************************************************************/
+typedef void fn_int_array_entry_delete(void *);
+struct array {
+	int	*entries;
+	int	num_entries;
+	fn_int_array_entry_delete	*delete;
+};
+
+#define int_array_for_each(a, ix, entry)	\
+	for (ix = 0;	\
+		 entry = ix < int_array_num_entries(a) ? \
+		 int_array_peek_entry(a, ix) : NULL, ix < int_array_num_entries(a);	\
+		 ++ix)
+
+static inline
+void int_array_init(struct int_array *this,
+					fn_int_array_entry_delete *delete)
+{
+	this->entries = NULL;
+	this->num_entries = 0;
+	this->delete = delete;
+}
+
+static inline
+int int_array_num_entries(const struct int_array *this)
+{
+	return this->num_entries;
+}
+
+static inline
+void *int_array_peek_entry(const struct int_array *this,
+						   const int index)
+{
+	assert(0 <= index && index < this->num_entries);
+	return this->entries[index];
+}
+
+static inline
+void *int_array_remove_entry(struct int_array *this,
+							 const int index)
+{
+	void *entry = array_peek_entry(this, index);
+	assert(entry);
+	this->entries[index] = NULL;
+	return entry;
+}
+
+/* If delete fn isn't proivded, do not call this function */
+static inline
+void int_array_delete_entry(struct int_array *this,
+							const int index)
+{
+	void *entry = int_array_remove_entry(this, index);
+	this->delete(entry);
+}
+
+/* Do not delete 'this' */
+static inline
+void int_array_empty(struct int_array *this)
+{
+	int i;
+	void *entry;
+
+	int_array_for_each(this, i, entry) {
+		if (entry == NULL)
+			continue;
+		int_array_delete_entry(this, i);
+	}
+	free(this->entries);
+	int_array_init(this, this->delete);
+}
+
+static inline
+int int_array_find(const struct int_array *this,
+				   const int entry)
+{
+	int i;
+
+	for (i = 0; i < int_array_num_entries(this); ++i) {
+		if (int_array_peek_entry(this, i) == entry)
+			return i;
+	}
+	return EOF;
+}
+
+/* Always adds at the tail */
+err_t int_array_add_entry(struct int_array *this,
+						  void *entry);
+/*****************************************************************************/
 typedef void fn_array_entry_delete(void *);
 struct array {
 	void	**entries;
