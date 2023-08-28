@@ -10,6 +10,9 @@
 #include <stdint.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -944,13 +947,99 @@ void cleanup()
 			r = &e->rules[j];
 			free(r->rhs);
 		}
-		free(e->name);
+		free((void *)e->name);
 		free(e->rules);
 		free(e->firsts);
 		free(e->incoming);
 	}
 	free(elements);
 }
+
+/*
+ * The first is an 32-bit int that gives the # of elements.
+ * The elements follow according to their index in incr. order.
+ * name (str ending with nul)
+ * is_terminal (byte: 0 == false, 1 == true)
+ * if (is_terminal == 0), then its rules in index order.
+ *  first, 32-bit int num_rules
+ *	num_rhs (32-bit int)
+ *	rhs array
+ *
+ * Then follows item-sets	in index order incr.
+ * The first is 32-bit int that gives # of item-sets.
+ *
+ * For each item-set,
+ * 32-bit integer for # of kernel items
+ * 32-bit integer for # of closure (non-kernel) items
+ * Then kernel items followed by closure items
+ * For each item
+ * <element, rule, dot-pos, jump, num_las, las-array>
+ */
+void serialize()
+{
+	int i, val, j, k;
+	int fd, num_items;
+	const struct element *e;
+	const struct rule *r;
+	const struct item_set *set;
+	const struct item *item;
+
+	fd = open("/tmp/x24.lr.bin", O_WRONLY | O_TRUNC | O_CREAT,
+			  S_IRUSR | S_IWUSR);
+	if (fd < 0) {
+		perror("open");
+		exit(errno);
+	}
+	assert(fd >= 0);
+
+	write(fd, &num_elements, sizeof(num_elements));
+	for (i = 0; i < num_elements; ++i) {
+		e = &elements[i];
+		write(fd, e->name, strlen(e->name) + 1);
+		val = 0;
+		if (e->is_terminal)
+			val = 1;
+		write(fd, &val, sizeof(char));
+		if (e->is_terminal)
+			continue;
+		assert(e->num_rules);
+		write(fd, &e->num_rules, sizeof(e->num_rules));
+		for (j = 0; j < e->num_rules; ++j) {
+			r = &e->rules[j];
+			assert(r->num_rhs);
+			write(fd, &r->num_rhs, sizeof(r->num_rhs));
+			for (k = 0; k < r->num_rhs; ++k) {
+				/* element indices */
+				write(fd, &r->rhs[k], sizeof(r->rhs[k]));
+			}
+		}
+	}
+
+	num_items = 0;
+	write(fd, &num_sets, sizeof(num_sets));
+	for (i = 0; i < num_sets; ++i) {
+		set = sets[i];
+		write(fd, &set->num_kernels, sizeof(set->num_kernels));
+		write(fd, &set->num_items, sizeof(set->num_items));
+		for (j = 0; j < set->num_kernels + set->num_items; ++j) {
+			if (j < set->num_kernels)
+				item = set->kernels[j];
+			else
+				item = set->items[j - set->num_kernels];
+			write(fd, &item->element, sizeof(item->element));
+			write(fd, &item->rule, sizeof(item->rule));
+			write(fd, &item->dot_pos, sizeof(item->dot_pos));
+			write(fd, &item->jump, sizeof(item->jump));
+			write(fd, &item->num_las, sizeof(item->num_las));
+			for (k = 0; k < item->num_las; ++k)
+				write(fd, &item->las[k], sizeof(item->las[k]));
+			++num_items;
+		}
+	}
+	close(fd);
+	printf("%d\n", num_items);
+}
+
 int main(int argc, char **argv)
 {
 	int i, err, j, len, lhs, epsilon;
@@ -1071,6 +1160,7 @@ int main(int argc, char **argv)
 	item_set_add_kernel(set, item);
 	closure(set);
 	//print_item_sets();
+	serialize();
 	cleanup();
 	return err;
 }
