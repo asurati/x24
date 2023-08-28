@@ -1195,7 +1195,7 @@ enum cc_token_type name_to_type(const char *name)
  */
 void serialize()
 {
-	int i, j, k;
+	int i, j;
 	int fd, num_items;
 	const struct element *e;
 	const struct rule *r;
@@ -1216,18 +1216,18 @@ void serialize()
 		e = &elements[i];
 		type = name_to_type(e->name);
 		write(fd, &type, sizeof(type));
-		if (e->is_terminal)
+		if (e->is_terminal) {
+			assert(type < CC_TOKEN_TRANSLATION_OBJECT);
 			continue;
+		}
+		assert(type >= CC_TOKEN_TRANSLATION_OBJECT);
 		assert(e->num_rules);
 		write(fd, &e->num_rules, sizeof(e->num_rules));
 		for (j = 0; j < e->num_rules; ++j) {
 			r = &e->rules[j];
 			assert(r->num_rhs);
 			write(fd, &r->num_rhs, sizeof(r->num_rhs));
-			for (k = 0; k < r->num_rhs; ++k) {
-				/* element indices */
-				write(fd, &r->rhs[k], sizeof(r->rhs[k]));
-			}
+			write(fd, &r->rhs[0], r->num_rhs * sizeof(r->rhs[0]));
 		}
 	}
 
@@ -1247,8 +1247,7 @@ void serialize()
 			write(fd, &item->dot_pos, sizeof(item->dot_pos));
 			write(fd, &item->jump, sizeof(item->jump));
 			write(fd, &item->num_las, sizeof(item->num_las));
-			for (k = 0; k < item->num_las; ++k)
-				write(fd, &item->las[k], sizeof(item->las[k]));
+			write(fd, &item->las[0], item->num_las * sizeof(item->las[0]));
 			++num_items;
 		}
 	}
