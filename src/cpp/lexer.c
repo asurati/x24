@@ -93,6 +93,7 @@ static const char *g_punctuators[] = {
 	"&=",
 	"|=",
 	"^=",
+	"->",
 
 	/* Triple-char tokens */
 	"<<=",
@@ -2085,7 +2086,7 @@ err_t lexer_lex_or(struct lexer *this,
 	return ESUCCESS;
 }
 /*****************************************************************************/
-/* - -- -= */
+/* - -- -= -> */
 static
 err_t lexer_lex_minus(struct lexer *this,
 					  struct lexer_token *out)
@@ -2101,7 +2102,7 @@ err_t lexer_lex_minus(struct lexer *this,
 	out->lex_size += cp.cp_size;
 
 	err = lexer_peek_code_point(this, &cp);
-	if (err || (cp.cp != '-' && cp.cp != '='))
+	if (err || (cp.cp != '-' && cp.cp != '=' && cp.cp != '>'))
 		return ESUCCESS;
 	lexer_consume_code_point(this, &cp);
 	out->type = LXR_TOKEN_MINUS_ASSIGN;
@@ -2109,6 +2110,9 @@ err_t lexer_lex_minus(struct lexer *this,
 	if (cp.cp == '=')
 		return ESUCCESS;
 	out->type = LXR_TOKEN_DECR;
+	if (cp.cp == '-')
+		return ESUCCESS;
+	out->type = LXR_TOKEN_ARROW;
 	return ESUCCESS;
 }
 
