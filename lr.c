@@ -2,7 +2,7 @@
 // Copyright (c) 2023 Amol Surati
 // vim: set noet ts=4 sts=4 sw=4:
 
-// cc -O3 -Wall -Wextra lr.c
+// cc -O3 -Wall -Wextra -I. lr.c
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -15,6 +15,13 @@
 #include <errno.h>
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+
+enum cc_token_type {
+#define DEF(t)	CC_TOKEN_ ## t,
+#include <inc/cpp/tokens.h>
+#include <inc/cc/tokens.h>
+#undef DEF
+};
 
 /* In order of appearance from A.2.1 Expressions */
 const char *terminals[] = {
@@ -53,7 +60,6 @@ const char *terminals[] = {
 	"&&",
 	"||",
 	"?",
-	":",
 	"=",
 	"*=",
 	"/=",
@@ -955,15 +961,227 @@ void cleanup()
 	free(elements);
 }
 
+#define DEF(t) CC_TOKEN_ ## t
+enum cc_token_type name_to_type(const char *name)
+{
+	if (!strcmp(name,"(")) return DEF(LEFT_PAREN);
+	if (!strcmp(name,")")) return DEF(RIGHT_PAREN);
+	if (!strcmp(name,"_Generic")) return DEF(GENERIC);
+	if (!strcmp(name,",")) return DEF(COMMA);
+	if (!strcmp(name,":")) return DEF(COLON);
+	if (!strcmp(name,"default")) return DEF(DEFAULT);
+	if (!strcmp(name,"[")) return DEF(LEFT_BRACKET);
+	if (!strcmp(name,"]")) return DEF(RIGHT_BRACKET);
+	if (!strcmp(name,".")) return DEF(DOT);
+	if (!strcmp(name,"->")) return DEF(ARROW);
+	if (!strcmp(name,"++")) return DEF(INCR);
+	if (!strcmp(name,"--")) return DEF(DECR);
+	if (!strcmp(name,"sizeof")) return DEF(SIZE_OF);
+	if (!strcmp(name,"alignof")) return DEF(ALIGN_OF);
+	if (!strcmp(name,"&")) return DEF(BITWISE_AND);
+	if (!strcmp(name,"*")) return DEF(MUL);
+	if (!strcmp(name,"+")) return DEF(PLUS);
+	if (!strcmp(name,"-")) return DEF(MINUS);
+	if (!strcmp(name,"~")) return DEF(BITWISE_NOT);
+	if (!strcmp(name,"!")) return DEF(LOGICAL_NOT);
+	if (!strcmp(name,"/")) return DEF(DIV);
+	if (!strcmp(name,"%")) return DEF(MOD);
+	if (!strcmp(name,"<<")) return DEF(SHIFT_LEFT);
+	if (!strcmp(name,">>")) return DEF(SHIFT_RIGHT);
+	if (!strcmp(name,"<")) return DEF(LESS_THAN);
+	if (!strcmp(name,">")) return DEF(GREATER_THAN);
+	if (!strcmp(name,"<=")) return DEF(LESS_THAN_EQUALS);
+	if (!strcmp(name,">=")) return DEF(GREATER_THAN_EQUALS);
+	if (!strcmp(name,"==")) return DEF(EQUALS);
+	if (!strcmp(name,"!=")) return DEF(NOT_EQUALS);
+	if (!strcmp(name,"^")) return DEF(BITWISE_XOR);
+	if (!strcmp(name,"|")) return DEF(BITWISE_OR);
+	if (!strcmp(name,"&&")) return DEF(LOGICAL_AND);
+	if (!strcmp(name,"||")) return DEF(LOGICAL_OR);
+	if (!strcmp(name,"?")) return DEF(CONDITIONAL);
+	if (!strcmp(name,"=")) return DEF(ASSIGN);
+	if (!strcmp(name,"*=")) return DEF(MUL_ASSIGN);
+	if (!strcmp(name,"/=")) return DEF(DIV_ASSIGN);
+	if (!strcmp(name,"%=")) return DEF(MOD_ASSIGN);
+	if (!strcmp(name,"+=")) return DEF(PLUS_ASSIGN);
+	if (!strcmp(name,"-=")) return DEF(MINUS_ASSIGN);
+	if (!strcmp(name,"<<=")) return DEF(SHIFT_LEFT_ASSIGN);
+	if (!strcmp(name,">>=")) return DEF(SHIFT_RIGHT_ASSIGN);
+	if (!strcmp(name,"&=")) return DEF(BITWISE_AND_ASSIGN);
+	if (!strcmp(name,"^=")) return DEF(BITWISE_XOR_ASSIGN);
+	if (!strcmp(name,"|=")) return DEF(BITWISE_OR_ASSIGN);
+	if (!strcmp(name,";")) return DEF(SEMI_COLON);
+	if (!strcmp(name,"auto")) return DEF(AUTO);
+	if (!strcmp(name,"constexpr")) return DEF(CONST_EXPR);
+	if (!strcmp(name,"extern")) return DEF(EXTERN);
+	if (!strcmp(name,"register")) return DEF(REGISTER);
+	if (!strcmp(name,"static")) return DEF(STATIC);
+	if (!strcmp(name,"thread_local")) return DEF(THREAD_LOCAL);
+	if (!strcmp(name,"typedef")) return DEF(TYPE_DEF);
+	if (!strcmp(name,"void")) return DEF(VOID);
+	if (!strcmp(name,"char")) return DEF(CHAR);
+	if (!strcmp(name,"short")) return DEF(SHORT);
+	if (!strcmp(name,"int")) return DEF(INT);
+	if (!strcmp(name,"long")) return DEF(LONG);
+	if (!strcmp(name,"float")) return DEF(FLOAT);
+	if (!strcmp(name,"double")) return DEF(DOUBLE);
+	if (!strcmp(name,"signed")) return DEF(SIGNED);
+	if (!strcmp(name,"unsigned")) return DEF(UNSIGNED);
+	if (!strcmp(name,"_BitInt")) return DEF(BIT_INT);
+	if (!strcmp(name,"bool")) return DEF(BOOL);
+	if (!strcmp(name,"_Complex")) return DEF(COMPLEX);
+	if (!strcmp(name,"_Decimal32")) return DEF(DECIMAL_32);
+	if (!strcmp(name,"_Decimal64")) return DEF(DECIMAL_64);
+	if (!strcmp(name,"_Decimal128")) return DEF(DECIMAL_128);
+	if (!strcmp(name,"{")) return DEF(LEFT_BRACE);
+	if (!strcmp(name,"}")) return DEF(RIGHT_BRACE);
+	if (!strcmp(name,"struct")) return DEF(STRUCT);
+	if (!strcmp(name,"union")) return DEF(UNION);
+	if (!strcmp(name,"enum")) return DEF(ENUM);
+	if (!strcmp(name,"_Atomic")) return DEF(ATOMIC);
+	if (!strcmp(name,"typeof")) return DEF(TYPE_OF);
+	if (!strcmp(name,"typeof_unqual")) return DEF(TYPE_OF_UNQUAL);
+	if (!strcmp(name,"const")) return DEF(CONST);
+	if (!strcmp(name,"restrict")) return DEF(RESTRICT);
+	if (!strcmp(name,"volatile")) return DEF(VOLATILE);
+	if (!strcmp(name,"inline")) return DEF(INLINE);
+	if (!strcmp(name,"_Noreturn")) return DEF(NO_RETURN);
+	if (!strcmp(name,"alignas")) return DEF(ALIGN_AS);
+	if (!strcmp(name,"static")) return DEF(STATIC);
+	if (!strcmp(name,"...")) return DEF(ELLIPSIS);
+	if (!strcmp(name,"static_assert")) return DEF(STATIC_ASSERT);
+	if (!strcmp(name,"::")) return DEF(DOUBLE_COLON);
+	if (!strcmp(name,"case")) return DEF(CASE);
+	if (!strcmp(name,"if")) return DEF(IF);
+	if (!strcmp(name,"switch")) return DEF(SWITCH);
+	if (!strcmp(name,"else")) return DEF(ELSE);
+	if (!strcmp(name,"while")) return DEF(WHILE);
+	if (!strcmp(name,"do")) return DEF(DO);
+	if (!strcmp(name,"for")) return DEF(FOR);
+	if (!strcmp(name,"goto")) return DEF(GO_TO);
+	if (!strcmp(name,"continue")) return DEF(CONTINUE);
+	if (!strcmp(name,"break")) return DEF(BREAK);
+	if (!strcmp(name,"return")) return DEF(RETURN);
+	if (!strcmp(name,"Identifier")) return DEF(IDENTIFIER);
+	if (!strcmp(name,"StringLiteral")) return DEF(STRING_LITERAL);
+	if (!strcmp(name,"Constant")) return DEF(CONST);
+
+	if (!strcmp(name,"AbstractDeclarator")) return DEF(ABSTRACT_DECLARATOR);
+	if (!strcmp(name,"AdditiveExpression")) return DEF(ADDITIVE_EXPRESSION);
+	if (!strcmp(name,"AlignmentSpecifier")) return DEF(ALIGNMENT_SPECIFIER);
+	if (!strcmp(name,"AndExpression")) return DEF(AND_EXPRESSION);
+	if (!strcmp(name,"ArgumentExpressionList")) return DEF(ARGUMENT_EXPRESSION_LIST);
+	if (!strcmp(name,"ArrayAbstractDeclarator")) return DEF(ARRAY_ABSTRACT_DECLARATOR);
+	if (!strcmp(name,"ArrayDeclarator")) return DEF(ARRAY_DECLARATOR);
+	if (!strcmp(name,"AssignmentExpression")) return DEF(ASSIGNMENT_EXPRESSION);
+	if (!strcmp(name,"AssignmentOperator")) return DEF(ASSIGNMENT_OPERATOR);
+	if (!strcmp(name,"AtomicTypeSpecifier")) return DEF(ATOMIC_TYPE_SPECIFIER);
+	if (!strcmp(name,"Attribute")) return DEF(ATTRIBUTE);
+	if (!strcmp(name,"AttributeArgumentClause")) return DEF(ATTRIBUTE_ARGUMENT_CLAUSE);
+	if (!strcmp(name,"AttributeDeclaration")) return DEF(ATTRIBUTE_DECLARATION);
+	if (!strcmp(name,"AttributeList")) return DEF(ATTRIBUTE_LIST);
+	if (!strcmp(name,"AttributePrefix")) return DEF(ATTRIBUTE_PREFIX);
+	if (!strcmp(name,"AttributePrefixedToken")) return DEF(ATTRIBUTE_PREFIXED_TOKEN);
+	if (!strcmp(name,"AttributeSpecifier")) return DEF(ATTRIBUTE_SPECIFIER);
+	if (!strcmp(name,"AttributeSpecifierSequence")) return DEF(ATTRIBUTE_SPECIFIER_SEQUENCE);
+	if (!strcmp(name,"AttributeToken")) return DEF(ATTRIBUTE_TOKEN);
+	if (!strcmp(name,"BalancedToken")) return DEF(BALANCED_TOKEN);
+	if (!strcmp(name,"BalancedTokenSequence")) return DEF(BALANCED_TOKEN_SEQUENCE);
+	if (!strcmp(name,"BlockItem")) return DEF(BLOCK_ITEM);
+	if (!strcmp(name,"BlockItemList")) return DEF(BLOCK_ITEM_LIST);
+	if (!strcmp(name,"BracedInitializer")) return DEF(BRACED_INITIALIZER);
+	if (!strcmp(name,"CastExpression")) return DEF(CAST_EXPRESSION);
+	if (!strcmp(name,"CompoundLiteral")) return DEF(COMPOUND_LITERAL);
+	if (!strcmp(name,"CompoundStatement")) return DEF(COMPOUND_STATEMENT);
+	if (!strcmp(name,"ConditionalExpression")) return DEF(CONDITIONAL_EXPRESSION);
+	if (!strcmp(name,"ConstantExpression")) return DEF(CONSTANT_EXPRESSION);
+	if (!strcmp(name,"Declaration")) return DEF(DECLARATION);
+	if (!strcmp(name,"DeclarationSpecifier")) return DEF(DECLARATION_SPECIFIER);
+	if (!strcmp(name,"DeclarationSpecifiers")) return DEF(DECLARATION_SPECIFIERS);
+	if (!strcmp(name,"Declarator")) return DEF(DECLARATOR);
+	if (!strcmp(name,"Designation")) return DEF(DESIGNATION);
+	if (!strcmp(name,"Designator")) return DEF(DESIGNATOR);
+	if (!strcmp(name,"DesignatorList")) return DEF(DESIGNATOR_LIST);
+	if (!strcmp(name,"DirectAbstractDeclarator")) return DEF(DIRECT_ABSTRACT_DECLARATOR);
+	if (!strcmp(name,"DirectDeclarator")) return DEF(DIRECT_DECLARATOR);
+	if (!strcmp(name,"EnumerationConstant")) return DEF(ENUMERATION_CONSTANT);
+	if (!strcmp(name,"Enumerator")) return DEF(ENUMERATOR);
+	if (!strcmp(name,"EnumeratorList")) return DEF(ENUMERATOR_LIST);
+	if (!strcmp(name,"EnumSpecifier")) return DEF(ENUM_SPECIFIER);
+	if (!strcmp(name,"EnumTypeSpecifier")) return DEF(ENUM_TYPE_SPECIFIER);
+	if (!strcmp(name,"EqualityExpression")) return DEF(EQUALITY_EXPRESSION);
+	if (!strcmp(name,"ExclusiveOrExpression")) return DEF(EXLUSIVE_OR_EXPRESSION);
+	if (!strcmp(name,"Expression")) return DEF(EXPRESSION);
+	if (!strcmp(name,"ExpressionStatement")) return DEF(EXPRESSION_STATEMENT);
+	if (!strcmp(name,"ExternalDeclaration")) return DEF(EXTERNAL_DECLARATION);
+	if (!strcmp(name,"FunctionAbstractDeclarator")) return DEF(FUNCTION_ABSTRACT_DECLARATOR);
+	if (!strcmp(name,"FunctionBody")) return DEF(FUNCTION_BODY);
+	if (!strcmp(name,"FunctionDeclarator")) return DEF(FUNCTION_DECLARATOR);
+	if (!strcmp(name,"FunctionDefinition")) return DEF(FUNCTION_DEFINITION);
+	if (!strcmp(name,"FunctionSpecifier")) return DEF(FUNCTION_SPECIFIER);
+	if (!strcmp(name,"GenericAssociation")) return DEF(GENERIC_ASSOCIATION);
+	if (!strcmp(name,"GenericAssocList")) return DEF(GENERIC_ASSOC_LIST);
+	if (!strcmp(name,"GenericSelection")) return DEF(GENERIC_SELECTION);
+	if (!strcmp(name,"InclusiveOrExpression")) return DEF(INCLUSIVE_OR_EXPRESSION);
+	if (!strcmp(name,"InitDeclarator")) return DEF(INIT_DECLARATOR);
+	if (!strcmp(name,"InitDeclaratorList")) return DEF(INIT_DECLARATOR_LIST);
+	if (!strcmp(name,"Initializer")) return DEF(INITIALIZER);
+	if (!strcmp(name,"InitializerList")) return DEF(INITIALIZER_LIST);
+	if (!strcmp(name,"IterationStatement")) return DEF(ITERATION_STATEMENT);
+	if (!strcmp(name,"JumpStatement")) return DEF(JUMP_STATEMENT);
+	if (!strcmp(name,"Label")) return DEF(LABEL);
+	if (!strcmp(name,"LabeledStatement")) return DEF(LABELED_STATEMENT);
+	if (!strcmp(name,"LogicalAndExpression")) return DEF(LOGICAL_AND_EXPRESSION);
+	if (!strcmp(name,"LogicalOrExpression")) return DEF(LOGICAL_OR_EXPRESSION);
+	if (!strcmp(name,"MemberDeclaration")) return DEF(MEMBER_DECLARATION);
+	if (!strcmp(name,"MemberDeclarationList")) return DEF(MEMBER_DECLARATION_LIST);
+	if (!strcmp(name,"MemberDeclarator")) return DEF(MEMBER_DECLARATOR);
+	if (!strcmp(name,"MemberDeclaratorList")) return DEF(MEMBER_DECLARATOR_LIST);
+	if (!strcmp(name,"MultiplicativeExpression")) return DEF(MULTIPLICATIVE_EXPRESSION);
+	if (!strcmp(name,"ParameterDeclaration")) return DEF(PARAMETER_DECLARATION);
+	if (!strcmp(name,"ParameterList")) return DEF(PARAMETER_LIST);
+	if (!strcmp(name,"ParameterTypeList")) return DEF(PARAMETER_TYPE_LIST);
+	if (!strcmp(name,"Pointer")) return DEF(POINTER);
+	if (!strcmp(name,"PostfixExpression")) return DEF(POSTFIX_EXPRESSION);
+	if (!strcmp(name,"PrimaryBlock")) return DEF(PRIMARY_BLOCK);
+	if (!strcmp(name,"PrimaryExpression")) return DEF(PRIMARY_EXPRESSION);
+	if (!strcmp(name,"RelationalExpression")) return DEF(RELATIONAL_EXPRESSION);
+	if (!strcmp(name,"SecondaryBlock")) return DEF(SECONDARY_BLOCK);
+	if (!strcmp(name,"SelectionStatement")) return DEF(SELECTION_STATEMENT);
+	if (!strcmp(name,"ShiftExpression")) return DEF(SHIFT_EXPRESSION);
+	if (!strcmp(name,"SpecifierQualifierList")) return DEF(SPECIFIER_QUALIFIER_LIST);
+	if (!strcmp(name,"StandardAttribute")) return DEF(STANDARD_ATTRIBUTE);
+	if (!strcmp(name,"Statement")) return DEF(STATEMENT);
+	if (!strcmp(name,"StaticAssertDeclaration")) return DEF(STATIC_ASSERT_DECLARATION);
+	if (!strcmp(name,"StorageClassSpecifier")) return DEF(STORAGE_CLASS_SPECIFIER);
+	if (!strcmp(name,"StorageClassSpecifiers")) return DEF(STORAGE_CLASS_SPECIFIERS);
+	if (!strcmp(name,"StructOrUnion")) return DEF(STRUCT_OR_UNION);
+	if (!strcmp(name,"StructOrUnionSpecifier")) return DEF(STRUCT_OR_UNION_SPECIFIER);
+	if (!strcmp(name,"TranslationObject")) return DEF(TRANSLATION_OBJECT);
+	if (!strcmp(name,"TranslationUnit")) return DEF(TRANSLATION_UNIT);
+	if (!strcmp(name,"TypedefName")) return DEF(TYPE_DEF_NAME);
+	if (!strcmp(name,"TypeName")) return DEF(TYPE_NAME);
+	if (!strcmp(name,"TypeofSpecifier")) return DEF(TYPE_OF_SPECIFIER);
+	if (!strcmp(name,"TypeofSpecifierArgument")) return DEF(TYPE_OF_SPECIFIER_ARGUMENT);
+	if (!strcmp(name,"TypeQualifier")) return DEF(TYPE_QUALIFIER);
+	if (!strcmp(name,"TypeQualifierList")) return DEF(TYPE_QUALIFIER_LIST);
+	if (!strcmp(name,"TypeSpecifier")) return DEF(TYPE_SPECIFIER);
+	if (!strcmp(name,"TypeSpecifierQualifier")) return DEF(TYPE_SPECIFIER_QUALIFIER);
+	if (!strcmp(name,"UnaryExpression")) return DEF(UNARY_EXPRESSION);
+	if (!strcmp(name,"UnaryOperator")) return DEF(UNARY_OPERATOR);
+	if (!strcmp(name,"UnlabeledStatement")) return DEF(UNLABELED_STATEMENT);
+	assert(0);
+}
+
 /*
  * The first is an 32-bit int that gives the # of elements.
  * The elements follow according to their index in incr. order.
- * name (str ending with nul)
- * is_terminal (byte: 0 == false, 1 == true)
- * if (is_terminal == 0), then its rules in index order.
+ * cc_token_type	(32-bit int)
+ * if non-terminal, then its rules in index order.
  *  first, 32-bit int num_rules
- *	num_rhs (32-bit int)
- *	rhs array
+ *  for each rule,
+ *	  num_elements (32-bit int)
+ *	  rhs elements array
  *
  * Then follows item-sets	in index order incr.
  * The first is 32-bit int that gives # of item-sets.
@@ -977,12 +1195,13 @@ void cleanup()
  */
 void serialize()
 {
-	int i, val, j, k;
+	int i, j, k;
 	int fd, num_items;
 	const struct element *e;
 	const struct rule *r;
 	const struct item_set *set;
 	const struct item *item;
+	enum cc_token_type type;
 
 	fd = open("/tmp/x24.lr.bin", O_WRONLY | O_TRUNC | O_CREAT,
 			  S_IRUSR | S_IWUSR);
@@ -995,11 +1214,8 @@ void serialize()
 	write(fd, &num_elements, sizeof(num_elements));
 	for (i = 0; i < num_elements; ++i) {
 		e = &elements[i];
-		write(fd, e->name, strlen(e->name) + 1);
-		val = 0;
-		if (e->is_terminal)
-			val = 1;
-		write(fd, &val, sizeof(char));
+		type = name_to_type(e->name);
+		write(fd, &type, sizeof(type));
 		if (e->is_terminal)
 			continue;
 		assert(e->num_rules);
