@@ -130,10 +130,16 @@ void cc_token_stream_empty(struct cc_token_stream *this)
 	queue_empty(&this->tokens);
 }
 /*****************************************************************************/
+struct cc_grammar_rule {
+	int *elements;
+	int num_elements;
+};
+
 /* terminals + non-terminals. rules valid for non-terminals alone */
 struct cc_grammar_element {
 	enum cc_token_type	type;
-	struct int_array	rules;	/* insert elements indices */
+	struct cc_grammar_rule	*rules;
+	int num_rules;
 };
 
 struct cc_grammar_item {
@@ -141,12 +147,14 @@ struct cc_grammar_item {
 	int	rule;
 	int	dot_position;	/* 0 <= dot-pos <= rule.num_elements */
 	int jump;
-	struct int_array	look_aheads;
+	int	num_look_aheads;
+	int *look_aheads;
 };
 
 struct cc_grammar_item_set {
-	struct array	kernel_items;	/* insert cc_grammar_item * */
-	struct array	closure_items;	/* ditto */
+	struct cc_grammar_item	*items;
+	int	num_kernel_items;
+	int	num_closure_items;
 };
 
 struct cc_parse_stack_entry {
@@ -155,26 +163,24 @@ struct cc_parse_stack_entry {
 };
 
 /*
- * child_tokens are meant to store tokens that need their string info to
+ * token is meant to store token that need its string info to
  * identify themselves; for e.g. identifiers, numbers, strings, etc.
  * key-words, puntuators do not need to store their tokens.
- * The order is the same in both child_tokens and child_types, where
- * child_types contain all child_nodes, but child_tokens will only contain
- * tokens if necessary as explained above.
- * |child_tokens| <= |child_nodes|, and |child_nodes| == num_children.
  */
 struct cc_parse_node {
 	enum cc_token_type	type;
-	struct queue	child_tokens;	/* insert cc_token * */
+	struct cc_token		*token;
 	struct queue	child_nodes;	/* insert cc_parse_node * */
 };
 /*****************************************************************************/
 struct compiler {
-	struct array	elements;
-	struct array	item_sets;
+	struct cc_grammar_element	*elements;
+	struct cc_grammar_item_set	*item_sets;
 	struct queue	roots_stack;	/* of the parse forest */
 	struct queue	parse_stack;
 
+	int num_elements;
+	int	num_item_sets;
 	int	cpp_tokens_fd;
 	const char	*cpp_tokens_path;
 	struct cc_token_stream	stream;

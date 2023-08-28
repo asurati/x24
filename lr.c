@@ -1203,7 +1203,7 @@ void serialize()
 	const struct item *item;
 	enum cc_token_type type;
 
-	fd = open("/tmp/x24.lr.bin", O_WRONLY | O_TRUNC | O_CREAT,
+	fd = open("/tmp/grammar.bin", O_WRONLY | O_TRUNC | O_CREAT,
 			  S_IRUSR | S_IWUSR);
 	if (fd < 0) {
 		perror("open");

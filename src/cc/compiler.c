@@ -41,39 +41,49 @@ void cc_token_print(const struct cc_token *this)
 }
 /*****************************************************************************/
 static
-void cc_grammar_element_delete(void *p)
+void cc_grammar_rule_delete(struct cc_grammar_rule *this)
 {
-	struct cc_grammar_element *this = p;
-	int_array_empty(&this->rules);
-	free(this);
+	free(this->elements);
+	/* Do not delete 'this; */
 }
-#if 0
+
 static
-void cc_grammar_item_delete(void *p)
+void cc_grammar_element_delete(struct cc_grammar_element *this)
 {
-	struct cc_grammar_item *this = p;
-	int_array_empty(&this->look_aheads);
-	free(this);
+	int i;
+
+	for (i = 0; i < this->num_rules; ++i)
+		cc_grammar_rule_delete(&this->rules[i]);
+	free(this->rules);
+	/* do not delete 'this' */
 }
-#endif
+
 static
-void cc_grammar_item_set_delete(void *p)
+void cc_grammar_item_delete(struct cc_grammar_item *this)
 {
-	struct cc_grammar_item_set *this = p;
-	array_empty(&this->kernel_items);
-	array_empty(&this->closure_items);
-	free(this);
+	free(this->look_aheads);
+	/* do not delete 'this' */
 }
-#if 0
+
+static
+void cc_grammar_item_set_delete(struct cc_grammar_item_set *this)
+{
+	int i;
+
+	for (i = 0; i < this->num_kernel_items + this->num_closure_items; ++i)
+		cc_grammar_item_delete(&this->items[i]);
+	free(this->items);
+	/* do not delete 'this' */
+}
+
 static
 void cc_parse_node_delete(void *p)
 {
 	struct cc_parse_node *this = p;
-	queue_empty(&this->child_tokens);
+	free(this->token);
 	queue_empty(&this->child_nodes);
 	free(this);
 }
-#endif
 /*****************************************************************************/
 err_t compiler_new(const char *path,
 				   struct compiler **out)
@@ -114,10 +124,10 @@ err_t compiler_new(const char *path,
 	}
 	this->cpp_tokens_path = path;
 	this->cpp_tokens_fd = fd;
-	array_init(&this->elements, cc_grammar_element_delete);
-	array_init(&this->item_sets, cc_grammar_item_set_delete);
-	stack_init(&this->roots_stack);
+	queue_init(&this->roots_stack, cc_parse_node_delete);
+	/*stack_init(&this->roots_stack);*/
 	stack_init(&this->parse_stack);
+	err = cc_load_grammar(this);
 	cc_token_stream_init(&this->stream, buffer, size);
 	*out = this;
 	return ESUCCESS;
@@ -129,14 +139,21 @@ err0:
 
 err_t compiler_delete(struct compiler *this)
 {
+	int i;
+
 	assert(this);
 	munmap((void *)this->stream.buffer, this->stream.buffer_size);
 	close(this->cpp_tokens_fd);
 	unlink(this->cpp_tokens_path);
 	free((void *)this->cpp_tokens_path);
 	cc_token_stream_empty(&this->stream);
-	array_empty(&this->elements);
-	array_empty(&this->item_sets);
+
+	for (i = 0; i < this->num_elements; ++i)
+		cc_grammar_element_delete(&this->elements[i]);
+	free(this->elements);
+	for (i = 0; i < this->num_item_sets; ++i)
+		cc_grammar_item_set_delete(&this->item_sets[i]);
+	free(this->item_sets);
 	queue_empty(&this->roots_stack);
 	assert(queue_is_empty(&this->parse_stack));
 	free(this);
