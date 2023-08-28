@@ -182,10 +182,10 @@ StructOrUnion:	union
 MemberDeclarationList:	MemberDeclaration
 MemberDeclarationList:	MemberDeclarationList	MemberDeclaration
 
-MemberDeclaration:	SpecifierQualifierList
-MemberDeclaration:	AttributeSpecifierSequence	SpecifierQualifierList
-MemberDeclaration:	SpecifierQualifierList	MemberDeclaratorList
-MemberDeclaration:	AttributeSpecifierSequence	SpecifierQualifierList	MemberDeclaratorList
+MemberDeclaration:	SpecifierQualifierList	;
+MemberDeclaration:	AttributeSpecifierSequence	SpecifierQualifierList	;
+MemberDeclaration:	SpecifierQualifierList	MemberDeclaratorList	;
+MemberDeclaration:	AttributeSpecifierSequence	SpecifierQualifierList	MemberDeclaratorList	;
 MemberDeclaration:	StaticAssertDeclaration
 
 SpecifierQualifierList:	TypeSpecifierQualifier
