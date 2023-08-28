@@ -1252,7 +1252,77 @@ void serialize()
 		}
 	}
 	close(fd);
-	printf("%d\n", num_items);
+	//printf("%d\n", num_items);
+}
+
+void detect_shift_reduce_conflicts()
+{
+	int i, j, k, l, m, n;
+	const struct item_set *set;
+	const struct element *e;
+	const struct rule *r;
+	const struct item *item[2];
+
+	for (i = 0; i < num_sets; ++i) {
+		set = sets[i];
+		for (j = 0; j < set->num_kernels; ++j) {
+			item[0] = set->kernels[j];
+			e = &elements[item[0]->element];
+			r = &e->rules[item[0]->rule];
+			if (item[0]->dot_pos < r->num_rhs)
+				continue;	/* not a reduce item */
+			/* For each las, see if there's a closure item */
+			for (k = 0; k < item[0]->num_las; ++k) {
+				if (item[0]->las[k] == EOF)
+					continue;
+				for (l = 0; l < set->num_items; ++l) {
+					item[1] = set->items[l];
+					assert(item[1]->dot_pos == 0);
+					e = &elements[item[1]->element];
+					r = &e->rules[item[1]->rule];
+					if (item[0]->las[k] == r->rhs[item[1]->dot_pos])
+						printf("sr i=%d,j=%d,k=%d,l=%d %s\n", i, j, k, l,
+							   elements[item[0]->las[k]].name);
+				}
+			}
+		}
+	}
+}
+
+void detect_reduce_reduce_conflicts()
+{
+	int i, j, k, l, m, n;
+	const struct item_set *set;
+	const struct element *e;
+	const struct rule *r;
+	const struct item *item[2];
+
+	for (i = 0; i < num_sets; ++i) {
+		set = sets[i];
+		for (j = 0; j < set->num_kernels; ++j) {
+			item[0] = set->kernels[j];
+			e = &elements[item[0]->element];
+			r = &e->rules[item[0]->rule];
+			if (item[0]->dot_pos < r->num_rhs)
+				continue;	/* not a reduce item */
+			for (k = j + 1; k < set->num_kernels; ++k) {
+				item[1] = set->kernels[j];
+				e = &elements[item[1]->element];
+				r = &e->rules[item[1]->rule];
+				if (item[1]->dot_pos < r->num_rhs)
+					continue;	/* not a reduce item */
+				/* Found two reduce items. See if they share an la */
+				for (m = 0; m < item[0]->num_las; ++m) {
+					for (n = 0; n < item[1]->num_las; ++n) {
+						if (item[0]->las[m] == item[1]->las[n])
+							printf("rr i=%d,j=%d,k=%d,m=%d,n=%d %s\n",
+								  i, j, k, l, m, n,
+								  elements[item[0]->las[m]].name);
+					}
+				}
+			}
+		}
+	}
 }
 
 int main(int argc, char **argv)
@@ -1375,7 +1445,9 @@ int main(int argc, char **argv)
 	item_set_add_kernel(set, item);
 	closure(set);
 	//print_item_sets();
-	serialize();
+	//serialize();
+	//detect_shift_reduce_conflicts();
+	//detect_reduce_reduce_conflicts();
 	cleanup();
 	return err;
 }
