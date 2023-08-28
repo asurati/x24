@@ -40,6 +40,41 @@ void cc_token_print(const struct cc_token *this)
 	printf("\n");
 }
 /*****************************************************************************/
+static
+void cc_grammar_element_delete(void *p)
+{
+	struct cc_grammar_element *this = p;
+	int_array_empty(&this->rules);
+	free(this);
+}
+#if 0
+static
+void cc_grammar_item_delete(void *p)
+{
+	struct cc_grammar_item *this = p;
+	int_array_empty(&this->look_aheads);
+	free(this);
+}
+#endif
+static
+void cc_grammar_item_set_delete(void *p)
+{
+	struct cc_grammar_item_set *this = p;
+	array_empty(&this->kernel_items);
+	array_empty(&this->closure_items);
+	free(this);
+}
+#if 0
+static
+void cc_parse_node_delete(void *p)
+{
+	struct cc_parse_node *this = p;
+	queue_empty(&this->child_tokens);
+	queue_empty(&this->child_nodes);
+	free(this);
+}
+#endif
+/*****************************************************************************/
 err_t compiler_new(const char *path,
 				   struct compiler **out)
 {
@@ -79,6 +114,10 @@ err_t compiler_new(const char *path,
 	}
 	this->cpp_tokens_path = path;
 	this->cpp_tokens_fd = fd;
+	array_init(&this->elements, cc_grammar_element_delete);
+	array_init(&this->item_sets, cc_grammar_item_set_delete);
+	stack_init(&this->roots_stack);
+	stack_init(&this->parse_stack);
 	cc_token_stream_init(&this->stream, buffer, size);
 	*out = this;
 	return ESUCCESS;
@@ -96,6 +135,10 @@ err_t compiler_delete(struct compiler *this)
 	unlink(this->cpp_tokens_path);
 	free((void *)this->cpp_tokens_path);
 	cc_token_stream_empty(&this->stream);
+	array_empty(&this->elements);
+	array_empty(&this->item_sets);
+	queue_empty(&this->roots_stack);
+	assert(queue_is_empty(&this->parse_stack));
 	free(this);
 	return ESUCCESS;
 }
@@ -303,7 +346,9 @@ err_t cc_token_stream_convert(struct cc_token_stream *this,
 
 	/*
 	 * TODO convert string-literals and char-consts to their exec-char-set
-	 * representation.
+	 * representation. The char-consts and numbers will also need evaluation;
+	 * compiler optimizations depend on such const-values to perform
+	 * effectively.
 	 */
 	err = ESUCCESS;
 	if (type == CC_TOKEN_NUMBER)

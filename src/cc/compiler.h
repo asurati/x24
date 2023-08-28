@@ -130,13 +130,55 @@ void cc_token_stream_empty(struct cc_token_stream *this)
 	queue_empty(&this->tokens);
 }
 /*****************************************************************************/
-struct parse_node {
+/* terminals + non-terminals. rules valid for non-terminals alone */
+struct cc_grammar_element {
 	enum cc_token_type	type;
+	struct int_array	rules;	/* insert elements indices */
+};
+
+struct cc_grammar_item {
+	int	element;
+	int	rule;
+	int	dot_position;	/* 0 <= dot-pos <= rule.num_elements */
+	int jump;
+	struct int_array	look_aheads;
+};
+
+struct cc_grammar_item_set {
+	struct array	kernel_items;	/* insert cc_grammar_item * */
+	struct array	closure_items;	/* ditto */
+};
+
+struct cc_parse_stack_entry {
+	int	item_set;	/* index into item_sets */
+	enum cc_token_type	token;	/* The current token */
+};
+
+/*
+ * child_tokens are meant to store tokens that need their string info to
+ * identify themselves; for e.g. identifiers, numbers, strings, etc.
+ * key-words, puntuators do not need to store their tokens.
+ * The order is the same in both child_tokens and child_types, where
+ * child_types contain all child_nodes, but child_tokens will only contain
+ * tokens if necessary as explained above.
+ * |child_tokens| <= |child_nodes|, and |child_nodes| == num_children.
+ */
+struct cc_parse_node {
+	enum cc_token_type	type;
+	struct queue	child_tokens;	/* insert cc_token * */
+	struct queue	child_nodes;	/* insert cc_parse_node * */
 };
 /*****************************************************************************/
 struct compiler {
+	struct array	elements;
+	struct array	item_sets;
+	struct queue	roots_stack;	/* of the parse forest */
+	struct queue	parse_stack;
+
 	int	cpp_tokens_fd;
 	const char	*cpp_tokens_path;
 	struct cc_token_stream	stream;
 };
+
+err_t cc_load_grammar(struct compiler *this);
 #endif
