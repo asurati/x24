@@ -6,8 +6,27 @@ TranslationUnit:	TranslationUnit	ExternalDeclaration
 
 # Expression
 PrimaryExpression:	Identifier
-PrimaryExpression:	Constant
-PrimaryExpression:	StringLiteral
+
+# Expand constants
+PrimaryExpression:	IntegerConstant
+PrimaryExpression:	FloatingConstant
+PrimaryExpression:	EnumerationConstant
+PrimaryExpression:	IntegerCharConstant
+PrimaryExpression:	Utf8CharConstant
+PrimaryExpression:	Utf16CharConstant
+PrimaryExpression:	Utf32CharConstant
+PrimaryExpression:	WcharTCharConstant
+PrimaryExpression:	true
+PrimaryExpression:	false
+PrimaryExpression:	nullptr
+
+# Expand string-literals
+PrimaryExpression:	CharStringLiteral
+PrimaryExpression:	Utf8StringLiteral
+PrimaryExpression:	Utf16StringLiteral
+PrimaryExpression:	Utf32StringLiteral
+PrimaryExpression:	WcharTStringLiteral
+
 PrimaryExpression:	(	Expression	)
 PrimaryExpression:	GenericSelection
 
@@ -366,12 +385,20 @@ DesignatorList:	DesignatorList	Designator
 Designator:	[	ConstantExpression	]
 Designator:	.	Identifier
 
-StaticAssertDeclaration:	static_assert	(	ConstantExpression	,	StringLiteral	)	;
+# Expand stringliteral
+StaticAssertDeclaration:	static_assert	(	ConstantExpression	,	CharStringLiteral	)	;
+StaticAssertDeclaration:	static_assert	(	ConstantExpression	,	Utf8StringLiteral	)	;
+StaticAssertDeclaration:	static_assert	(	ConstantExpression	,	Utf16StringLiteral	)	;
+StaticAssertDeclaration:	static_assert	(	ConstantExpression	,	Utf32StringLiteral	)	;
+StaticAssertDeclaration:	static_assert	(	ConstantExpression	,	WcharTStringLiteral	)	;
 StaticAssertDeclaration:	static_assert	(	ConstantExpression	)	;
 
 AttributeSpecifierSequence:	AttributeSpecifier
 AttributeSpecifierSequence:	AttributeSpecifierSequence	AttributeSpecifier
 
+# That AttributeList can be epsilon is represented below by an extra
+# rule for AttributeSpecifier, thereby removing the only epsilon production
+# (AttributeList can generate epsilon) from the grammar.
 AttributeSpecifier:	[	[	]	]
 AttributeSpecifier:	[	[	AttributeList	]	]
 
