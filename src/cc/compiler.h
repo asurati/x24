@@ -91,7 +91,7 @@ void cc_token_delete(void *this);
 struct cc_token_stream {
 	const char	*buffer;	/* file containing the cpp_tokens */
 	size_t		buffer_size;
-	struct queue	tokens;		/* queue of cc_tokens */
+	struct queue	tokens;		/* Each entry is a cc_token* */
 };
 
 static inline
@@ -101,7 +101,8 @@ void cc_token_stream_init(struct cc_token_stream *this,
 {
 	this->buffer = buffer;
 	this->buffer_size = buffer_size;
-	queue_init(&this->tokens, cc_token_delete);
+	queue_init(&this->tokens, sizeof(void *), cc_token_delete);
+	/* Each entry in the queue is a pointer. */
 }
 
 static inline
@@ -131,13 +132,13 @@ void cc_token_stream_empty(struct cc_token_stream *this)
 }
 /*****************************************************************************/
 struct cc_grammar_rule {
-	struct int_array	rules;	/* The first int is the lhs, rest rhs */
+	struct queue	rules;	/* the first int is lhs, rest is rhs */
 };
 
 /* terminals + non-terminals. rules valid for non-terminals alone */
 struct cc_grammar_element {
 	enum cc_token_type	type;
-	struct array	rules;
+	struct queue	rules;	/* Each entry in the q is a struct rule obj */
 };
 
 /* Earley item */
@@ -160,7 +161,7 @@ struct cc_grammar_item {
  * TODO McLean/Horspool impl to combine lr(1) and Earley.
  */
 struct cc_grammar_item_set {
-	struct array	*items;
+	struct queue	items;	/* Each q-entry is cc_gram_item* */
 };
 
 /*
@@ -171,21 +172,18 @@ struct cc_grammar_item_set {
 struct cc_parse_node {
 	enum cc_token_type	type;
 	struct cc_token		*token;
-	struct queue	child_nodes;	/* insert cc_parse_node * */
+	struct queue	child_nodes;	/* each q-entry is a cc_parse_node* */
 };
 /*****************************************************************************/
 struct compiler {
-	struct cc_grammar_element		*elements;
-	struct cc_grammar_item_set	*item_sets;
+	struct queue	elements;	/* Each q-entry is cc_gram_elem obj */
+	struct queue	item_sets;	/* Each q-entry is cc_gram_item_set* */
 	struct queue	roots_stack;	/* of the parse forest */
 	struct queue	parse_stack;
 
-	int num_elements;
-	int	num_item_sets;
 	int	cpp_tokens_fd;
 	const char	*cpp_tokens_path;
 	struct cc_token_stream	stream;
 };
-
 err_t cc_load_grammar(struct compiler *this);
 #endif

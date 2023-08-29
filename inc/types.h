@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <string.h>
 
 #define NULL_CHAR	'\0'
 
@@ -21,24 +22,12 @@ char	*strdup(const char *str);
 
 #define ARRAY_SIZE(a)	(sizeof(a) / sizeof((a)[0]))
 /*****************************************************************************/
-/*
- * Queue is implemented without holes. An item removed will cause the
- * subsequent items to shift forward. This changes the address of the items
- * that are moved. Deletion provides type * which the del routine should not
- * free.
- */
-#define QUEUE_FOR_EACH(name, q, ix, e)	\
-	for (ix = 0;	e = ix < name ## _queue_num_entries(q) ?	\
-		 name ## _queue_peek_entry(q, ix) : e,	\
-		 ix < name ## _queue_num_entries(q); ++ix)
-
-#define QUEUE_FOR_EACH_WITH_REMOVE(name, q, c, e)	\
-	while (c = name ## _queue_is_empty(q),	\
-		   e = c ? e : name ## _queue_remove_head(q), \
-		   !c)
+#define QUEUE_FOR_EACH(q, ix, e)	\
+	for (ix = 0; ix < queue_num_entries(q) ?	\
+		 e = queue_peek_entry(q, ix) : NULL; ++ix)
 
 #define QUEUE_FOR_EACH_REVERSE(name, q, ix, e)	\
-	for (ix = name ## _queue_num_entries - 1;	\
+	for (ix = queue_num_entries( - 1;	\
 		 e = ix >= 0 ? name ## _queue_peek_entry(q, ix) : e, ix >= 0; --ix)
 
 #define QUEUE_FOR_EACH_WITH_REMOVE_REVERSE(name, q, c, e)	\
@@ -46,81 +35,145 @@ char	*strdup(const char *str);
 		   e = c ? e : name ## _queue_remove_tail(q), \
 		   !c)
 
-#define DEFINE_QUEUE_TYPE(name, type)	\
-typedef void fn_ ## name ## _queue_delete_entry(type entry);	\
-struct name ## _queue {	\
-	type	*entries;	\
-	int		num_entries, num_entries_allocated, read, size;	\
-	fn_ ## name ## _queue_delete_entry	*delete;	\
-};	\
-static inline	\
-bool name ## _queue_is_empty(const struct name ## _queue *this) {	\
-	return this->num_entries == 0;}	\
-static inline	\
-bool name ## _queue_is_full(const struct name ## _queue *this) {	\
-	return this->num_entries == this->num_entries_allocated;}	\
-static inline	\
-int name ## _queue_num_entries(struct name ## _queue *this) {	\
-	return this->num_entries; }	\
-static inline	\
-void name ## _queue_init(struct name ## _queue *this,	\
-						 fn_ ## name ## _queue_delete_entry *delete) {	\
-	this->entries = NULL; this->delete = delete; this->read = -1; \
-	this->num_entries_allocated = this->num_entries = 0;	\
-	this->size = sizeof(type);}	\
-static inline	\
-type *name ## _queue_peek_entry_address(struct name ## _queue *this,	\
-										const int index)	{int pos;	\
-	assert(0 <= index && index < this->num_entries);	\
-	pos = (this->read + index) % this->num_entries_allocated;	\
-	return &this->entries[pos];}	\
-static inline	\
-type name ## _queue_peek_entry(struct name ## _queue *this,	\
-							   const int index)	{	\
-	return *name ## _queue_peek_entry_address(this, index);}	\
-static inline	\
-bool name ## _queue_find(struct name ## _queue *this,	\
-						 const type entry) {int i;	\
-	for (i = 0; i < this->num_entries; ++i)	\
-	if (name ## _queue_peek_entry(this, i) == entry) return true;	\
-	return false;}	\
-void name ## _queue_delete_entry(struct name ## _queue *this,	\
-								 const int index) {	\
-	this->delete(name ## _queue_peek_entry(this, index));	\
-	name ## _queue_remove_entry(this, index);}	\
-static inline	\
-type name ## _queue_peek_head(struct name ## _queue *this) {	\
-	return name ## _queue_peek_entry(this, 0);}	\
-static inline	\
-type name ## _queue_peek_tail(struct name ## _queue *this) {	\
-	return name ## _queue_peek_entry(this, this->num_entries - 1);}	\
-static inline	\
-type *name ## _queue_peek_head_address(struct name ## _queue *this) {	\
-	return name ## _queue_peek_entry_address(this, 0);}	\
-static inline	\
-type *name ## _queue_peek_tail_address(struct name ## _queue *this) {	\
-	return name ## _queue_peek_entry_address(this, this->num_entries - 1);}	\
-static inline	\
-type name ## _queue_remove_head(struct name ## _queue *this) {	\
-	return name ## _queue_remove_entry(this, 0);}	\
-static inline	\
-type name ## _queue_remove_tail(struct name ## _queue *this) {	\
-	return name ## _queue_remove_entry(this, this->num_entries - 1);}	\
-static inline	\
-void name ## _queue_delete_head(struct name ## _queue *this) {	\
-	name ## _queue_delete_entry(this, 0);}	\
-static inline	\
-void name ## _queue_delete_tail(struct name ## _queue *this) {	\
-	name ## _queue_delete_entry(this, this->num_entries - 1); }	\
-void name ## _queue_empty(struct name ## _queue *this) {	\
-	while (!name ## _queue_is_empty(this))	\
-	name ## _queue_delete_head(this); }	\
-err_t queue_move(struct name ## _queue *this, struct name ## _queue *to) {	\
-	while (!name ## _queue_is_empty(this))	{err_t err;	type entry; \
-		entry = name ## _queue_remove_head(this);	\
-		err = name ## _queue_add_tail(to, entry);	if (err) return err;} \
-err_t name ## _queue_add_entry(struct name ## _queue *this,	\
-							   type entry);\
-type name ## _queue_remove_entry(struct name ## _queue *this,	\
-								 const int index);
+/* Queue is implemented without holes. Allows removal from the middle. */
+/*
+ * Deleteion recieves a ptr to the entry, which the delete routine must not
+ * free.
+ */
+typedef void fn_queue_delete_entry(void *p);
+struct queue {
+	int	num_entries;
+	int	num_entries_allocated;
+	int	entry_size;
+	int	read;
+	char	*entries;
+	fn_queue_delete_entry	*delete;
+};
+
+void	queue_remove_entry(struct queue *this,
+						   const int index);
+err_t	queue_add_head(struct queue *this,
+					   const void *entry);
+err_t	queue_add_tail(struct queue *this,
+					   const void *entry);
+err_t	queue_move(struct queue *this,
+				   struct queue *to);
+
+static inline
+void queue_init(struct queue *this,
+				const int entry_size,
+				fn_queue_delete_entry *delete)
+{
+	this->num_entries_allocated = this->num_entries = this->read = 0;
+	this->entry_size = entry_size;
+	this->delete = delete;
+	this->entries = NULL;
+}
+
+static inline
+bool queue_is_empty(const struct queue *this)
+{
+	return this->num_entries == 0;
+}
+
+static inline
+bool queue_is_full(const struct queue *this)
+{
+	return this->num_entries == this->num_entries_allocated;
+}
+
+static inline
+int queue_num_entries(const struct queue *this)
+{
+	return this->num_entries;
+}
+
+/*
+ * Always returns the pointer to the entry. The address is within the entries
+ * array. The address can change; if the caller wants the entry to remain at a
+ * fixed address, they can instead create the queue for &entry.
+ */
+static inline
+void *queue_peek_entry(const struct queue *this,
+					   const int index)
+{
+	int pos;
+	assert(0 <= index && index < this->num_entries);
+	pos = (this->read + index) % this->num_entries_allocated;
+	return this->entries + pos * this->entry_size;
+}
+
+/*
+ * Note that we use memcmp; all queue entries must be initialize with memset so
+ * that any compiler-generated padding is set to 0.
+ */
+static inline
+bool queue_find(const struct queue *this,
+				const void *entry)
+{
+	int i;
+	for (i = 0; i < this->num_entries; ++i) {
+		if (!memcmp(queue_peek_entry(this, i), entry, this->entry_size))
+			return true;
+	}
+	return false;
+}
+
+static inline
+void queue_delete_entry(struct queue *this,
+						const int index)
+{
+	this->delete(queue_peek_entry(this, index));
+	queue_remove_entry(this, index);
+}
+
+static inline
+void *queue_peek_head(struct queue *this)
+{
+	assert(!queue_is_empty(this));
+	return queue_peek_entry(this, 0);
+}
+
+static inline
+void *queue_peek_tail(struct queue *this)
+{
+	assert(!queue_is_empty(this));
+	return queue_peek_entry(this, this->num_entries - 1);
+}
+
+static inline
+void queue_remove_head(struct queue *this)
+{
+	assert(!queue_is_empty(this));
+	queue_remove_entry(this, 0);
+}
+
+static inline
+void queue_remove_tail(struct queue *this)
+{
+	assert(!queue_is_empty(this));
+	queue_remove_entry(this, this->num_entries - 1);
+}
+
+static inline
+void queue_delete_head(struct queue *this)
+{
+	assert(!queue_is_empty(this));
+	queue_delete_entry(this, 0);
+}
+
+static inline
+void queue_delete_tail(struct queue *this)
+{
+	assert(!queue_is_empty(this));
+	queue_delete_entry(this, this->num_entries - 1);
+}
+
+static inline
+void queue_empty(struct queue *this)
+{
+	while (!queue_is_empty(this))
+		queue_delete_head(this);
+}
+/*****************************************************************************/
 #endif

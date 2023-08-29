@@ -86,10 +86,16 @@ bool cpp_token_is_marked(const struct cpp_token *this)
 
 static
 void cpp_token_delete(void *p);
+
+static inline
+void cpp_token_queue_init(struct queue *this)
+{
+	queue_init(this, sizeof(void *), cpp_token_delete);
+}
 /*****************************************************************************/
 struct cpp_token_stream {
 	struct lexer	*lexer;
-	struct queue	tokens;
+	struct queue	tokens;	/* Each q-entry is a cpp_token* */
 };
 
 static inline
@@ -97,7 +103,7 @@ void cpp_token_stream_init(struct cpp_token_stream *this,
 						   struct lexer *lexer)
 {
 	this->lexer = lexer;
-	queue_init(&this->tokens, cpp_token_delete);
+	queue_init(&this->tokens, sizeof(void *), cpp_token_delete);
 }
 
 static inline
@@ -227,8 +233,12 @@ struct rpn_stack_entry {
 };
 /*****************************************************************************/
 struct scanner {
-	struct array	macros;
-	struct queue	cistk;	/* conditional inclusion stack */
+	struct queue	macros;	/* Each q-entry is a macro* */
+
+	/*
+	 * Conditional Inclusion Stack.
+	 * Each q-entry is cond_incl_stack_entry obj */
+	struct queue	cistk;
 
 	const char	*include_paths[4];
 	const char	*predefined_macros_path;

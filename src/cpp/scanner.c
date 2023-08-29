@@ -76,8 +76,8 @@ err_t scanner_new(struct scanner **out)
 	if (this == NULL)
 		return ENOMEM;
 
-	array_init(&this->macros, macro_delete);
-	stack_init(&this->cistk);
+	queue_init(&this->macros, sizeof(void *), macro_delete);
+	queue_init(&this->cistk, sizeof(struct cond_incl_stack_entry), NULL);
 
 	this->cpp_tokens_path = NULL;
 	this->cpp_tokens_fd = -1;
@@ -109,8 +109,8 @@ err_t scanner_delete(struct scanner *this)
 	/*unlink(this->cpp_tokens_path);*/
 	free((void *)this->cpp_tokens_path);
 
-	assert(stack_num_entries(&this->cistk) == 0);
-	array_empty(&this->macros);
+	assert(queue_num_entries(&this->cistk) == 0);
+	queue_empty(&this->macros);
 	free(this);
 	return ESUCCESS;
 }
@@ -126,12 +126,13 @@ int scanner_find_macro_index(const struct scanner *this,
 {
 	int i;
 	const char *name[2];
-	const struct macro *macro;
+	const struct macro *macro, **entry;
 
 	name[0] = ident;
-	array_for_each(&this->macros, i, macro) {
-		if (macro == NULL)
-			continue;
+	QUEUE_FOR_EACH(&this->macros, i, entry) {
+		assert(entry);
+		macro = *entry;
+		assert(macro);
 		name[1] = cpp_token_resolved(macro->identifier);
 		if (!strcmp(name[0], name[1]))
 			return i;
@@ -146,14 +147,14 @@ const struct macro *scanner_find_macro(const struct scanner *this,
 	int i = scanner_find_macro_index(this, ident);
 	if (i < 0)
 		return NULL;
-	return array_peek_entry(&this->macros, i);
+	return *(const struct macro **)queue_peek_entry(&this->macros, i);
 }
 /*****************************************************************************/
 /* During deletion, take care to not free static mem */
 static
 void cpp_token_delete(void *p)
 {
-	struct cpp_token *this = p;
+	struct cpp_token *this = *(struct cpp_token **)p;
 	lexer_token_deref(this->base);
 	free(this);
 }
@@ -269,13 +270,16 @@ err_t cpp_tokens_copy(const struct queue *this,
 {
 	int i;
 	err_t err;
-	struct cpp_token *t;
-	struct cpp_token *token;
+	struct cpp_token *t, *token, **entry;
 
-	queue_for_each(this, i, t) {
+	assert(this->delete == cpp_token_delete);
+	QUEUE_FOR_EACH(this, i, entry) {
+		assert(entry);
+		t = *entry;
+		assert(t);
 		err = cpp_token_copy(t, &token);
 		if (!err)
-			err = queue_add_tail(out, token);
+			err = queue_add_tail(out, &token);
 		if (err)
 			return err;
 	}
@@ -291,16 +295,21 @@ static
 err_t cpp_tokens_remove_place_markers(struct queue *this)
 {
 	err_t err;
-	struct cpp_token *token;
+	int i;
+	struct cpp_token *token, **entry;
 	struct queue out;
 
-	queue_init(&out, cpp_token_delete);
-	queue_for_each_with_rem(this, token) {
+	cpp_token_queue_init(&out);
+	QUEUE_FOR_EACH(this, i, entry) {
+		assert(entry);
+		token = *entry;	/* Read the q-entry. q-entry can now be removed */
+		assert(token);
+		queue_remove_entry(this, i);
 		if (cpp_token_type(token) == LXR_TOKEN_PLACE_MARKER) {
 			cpp_token_delete(token);
 			continue;
 		}
-		err = queue_add_tail(&out, token);
+		err = queue_add_tail(&out, &token);
 		if (err)
 			return err;
 	}
@@ -356,7 +365,7 @@ err_t cpp_token_stream_remove_head(struct cpp_token_stream *this,
 static
 void macro_delete(void *p)
 {
-	struct macro *this = p;
+	struct macro *this = *(struct macro **)p;
 	cpp_token_delete(this->identifier);
 	queue_empty(&this->parameters);
 	queue_empty(&this->replacement_list);
@@ -1457,7 +1466,7 @@ bool cond_incl_stack_in_skip_zone(const struct queue *this)
 	if (stack_is_empty(this))
 		return false;
 
-	for (i = 0; i < stack_num_entries(this); ++i) {
+	for (i = 0; i < queue_num_entries(this); ++i) {
 		entry = stack_peek(this);
 		if (entry->state == COND_INCL_STATE_WAIT ||
 			entry->state == COND_INCL_STATE_DONE)

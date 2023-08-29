@@ -64,16 +64,9 @@ char *strdup(const char *str)
 static
 err_t queue_realloc(struct queue *this)
 {
-	int num_entries_allocated, i, num_allocate;
+	int num_entries_allocated, num_allocate;
 	size_t size;
 
-	/* first time alloc */
-	if (this->read < 0) {
-		assert(this->num_entries_allocated == 0);
-		assert(this->num_entries == 0);
-		assert(this->entries == NULL);
-		this->read = 0;
-	}
 	assert(this->read >= 0);
 	/*
 	 * a state such as read == 32, num_entries == 80 and
@@ -99,14 +92,15 @@ err_t queue_realloc(struct queue *this)
 
 	num_entries_allocated = this->num_entries_allocated;	/* save */
 	this->num_entries_allocated += num_allocate;
-	size = this->num_entries_allocated * sizeof(void *);
+	size = this->num_entries_allocated * this->entry_size;
 	this->entries = realloc(this->entries, size);
 	if (this->entries == NULL)
 		return ENOMEM;
 
 	/* Move the pointers [0, r-1] to [prev-nia, prev-nia + r - 1] */
-	for (i = 0; i < this->read; ++i)
-		this->entries[num_entries_allocated + i] = this->entries[i];
+	memcpy(this->entries + num_entries_allocated * this->entry_size,
+		   this->entries,
+		   this->read * this->entry_size);
 	return ESUCCESS;
 }
 /*
@@ -119,7 +113,7 @@ err_t queue_realloc(struct queue *this)
  *    if queue is not full, store at r, set r to r-1, incr. num_entries.
  */
 err_t queue_add_tail(struct queue *this,
-					 void *entry)
+					 const void *entry)
 {
 	err_t err;
 	int pos;
@@ -130,7 +124,9 @@ err_t queue_add_tail(struct queue *this,
 	if (err)
 		return err;
 	pos = (this->read + this->num_entries) % this->num_entries_allocated;
-	this->entries[pos] = entry;
+	memcpy(this->entries + pos * this->entry_size,
+		   entry,
+		   this->entry_size);
 	++this->num_entries;
 	return ESUCCESS;
 }
@@ -141,7 +137,7 @@ err_t queue_add_tail(struct queue *this,
  *    num_entries.
  */
 err_t queue_add_head(struct queue *this,
-					 void *entry)
+					 const void *entry)
 {
 	err_t err;
 
@@ -153,26 +149,66 @@ err_t queue_add_head(struct queue *this,
 	--this->read;
 	if (this->read == -1)
 		this->read += this->num_entries_allocated;
-	if (!(0 <= this->read && this->read < this->num_entries_allocated))
-		for (;;);
 	assert(0 <= this->read && this->read < this->num_entries_allocated);
-
-	this->entries[this->read] = entry;
+	memcpy(this->entries + this->read * this->entry_size,
+		   entry,
+		   this->entry_size);
 	++this->num_entries;
 	return ESUCCESS;
 }
 
-err_t queue_move(struct queue *this,
-				 struct queue *out)
+void queue_remove_entry(struct queue *this,
+						const int index)
 {
-	void *entry;
-	err_t err;
+	int i, num_entries, read, write;
 
-	queue_for_each_with_rem(this, entry) {
-		err = queue_add_tail(out, entry);
+	assert(this->num_entries);
+	/* head or tail removal are simple */
+	if (index == 0 || index == this->num_entries - 1) {
+		if (index == 0) {
+			++this->read;
+			this->read %= this->num_entries_allocated;
+		}
+		goto done;
+	}
+	/*
+	 * Removal in the middle is supported for the queue of macros.
+	 * Since each q entry is a macro* instead of a macro, the location of each
+	 * macro* within the queue can change without affecting the caller.
+	 */
+	assert(index > 0 && index < this->num_entries - 1);
+	num_entries = this->num_entries - index - 1;
+	assert(num_entries > 0);
+	write = this->read + index;
+	read = write + 1;
+	assert(read <= this->num_entries);
+	for (i = 0; i < num_entries; ++i, ++read, ++write) {
+		read %= this->num_entries_allocated;
+		write %= this->num_entries_allocated;
+		memcpy(this->entries + write * this->entry_size,
+			   this->entries + read * this->entry_size,
+			   this->entry_size);
+	}
+done:
+	if (--this->num_entries)
+		return;
+	free(this->entries);
+	queue_init(this, this->entry_size, this->delete);
+}
+
+err_t queue_move(struct queue *this,
+				 struct queue *to)
+{
+	err_t err;
+	void *entry;
+
+	while (!queue_is_empty(this)) {
+		entry = queue_peek_head(this);
+		err = queue_add_tail(to, entry);
 		if (err)
 			return err;
+		/* Do not call delete. We are just moving entries */
+		queue_remove_head(this);
 	}
-	queue_delete(this);
 	return ESUCCESS;
 }
