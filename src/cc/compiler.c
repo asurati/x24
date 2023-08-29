@@ -95,6 +95,7 @@ err_t compiler_new(const char *path,
 	struct compiler *this;
 	struct stat stat;
 
+	err = ESUCCESS;
 	this = malloc(sizeof(*this));
 	if (this == NULL)
 		return ENOMEM;
@@ -127,7 +128,12 @@ err_t compiler_new(const char *path,
 	queue_init(&this->roots_stack, cc_parse_node_delete);
 	/*stack_init(&this->roots_stack);*/
 	stack_init(&this->parse_stack);
+	this->elements = NULL;
+	this->item_sets = NULL;
+	this->num_elements = this->num_item_sets = 0;
 	err = cc_load_grammar(this);
+	if (err)
+		goto err1;
 	cc_token_stream_init(&this->stream, buffer, size);
 	*out = this;
 	return ESUCCESS;
@@ -154,6 +160,7 @@ err_t compiler_delete(struct compiler *this)
 	for (i = 0; i < this->num_item_sets; ++i)
 		cc_grammar_item_set_delete(&this->item_sets[i]);
 	free(this->item_sets);
+
 	queue_empty(&this->roots_stack);
 	assert(queue_is_empty(&this->parse_stack));
 	free(this);

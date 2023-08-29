@@ -131,35 +131,36 @@ void cc_token_stream_empty(struct cc_token_stream *this)
 }
 /*****************************************************************************/
 struct cc_grammar_rule {
-	int *elements;
-	int num_elements;
+	struct int_array	rules;	/* The first int is the lhs, rest rhs */
 };
 
 /* terminals + non-terminals. rules valid for non-terminals alone */
 struct cc_grammar_element {
 	enum cc_token_type	type;
-	struct cc_grammar_rule	*rules;
-	int num_rules;
+	struct array	rules;
 };
 
+/* Earley item */
 struct cc_grammar_item {
 	int	element;
 	int	rule;
-	int	dot_position;	/* 0 <= dot-pos <= rule.num_elements */
-	int jump;
-	int	num_look_aheads;
-	int *look_aheads;
+	int	dot_position;	/* 0 <= dot-pos <= rule.num_entries */
+	int	origin;
+	/*
+	 * origin is the item-set where the corresponding item with dot-pos == 0
+	 * was added by the prediction.
+	 */
 };
 
+/*
+ * Earley item-set.
+ * As long as any item still points to the item-set, we cannot free it.
+ * items whose origin is the same as the item-set do not contribute to the
+ * ref-count.
+ * TODO McLean/Horspool impl to combine lr(1) and Earley.
+ */
 struct cc_grammar_item_set {
-	struct cc_grammar_item	*items;
-	int	num_kernel_items;
-	int	num_closure_items;
-};
-
-struct cc_parse_stack_entry {
-	int	item_set;	/* index into item_sets */
-	enum cc_token_type	token;	/* The current token */
+	struct array	*items;
 };
 
 /*
@@ -174,7 +175,7 @@ struct cc_parse_node {
 };
 /*****************************************************************************/
 struct compiler {
-	struct cc_grammar_element	*elements;
+	struct cc_grammar_element		*elements;
 	struct cc_grammar_item_set	*item_sets;
 	struct queue	roots_stack;	/* of the parse forest */
 	struct queue	parse_stack;
