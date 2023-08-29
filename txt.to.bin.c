@@ -136,7 +136,6 @@ const char *terminals[] = {
 	"nullptr",
 	"IntegerConstant",
 	"FloatingConstant",
-	"EnumerationConstant",
 	"IntegerCharConstant",
 	"Utf8CharConstant",
 	"Utf16CharConstant",
@@ -256,7 +255,6 @@ enum cc_token_type name_to_type(const char *name)
 	if (!strcmp(name,"nullptr")) return DEF(NULL_PTR);
 	if (!strcmp(name,"IntegerConstant")) return DEF(INTEGER_CONST);
 	if (!strcmp(name,"FloatingConstant")) return DEF(FLOATING_CONST);
-	if (!strcmp(name,"EnumerationConstant")) return DEF(ENUMERATION_CONST);
 	if (!strcmp(name,"IntegerCharConstant")) return DEF(INTEGER_CHAR_CONST);
 	if (!strcmp(name,"Utf8CharConstant")) return DEF(UTF_8_CHAR_CONST);
 	if (!strcmp(name,"Utf16CharConstant")) return DEF(UTF_16_CHAR_CONST);
