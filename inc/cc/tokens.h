@@ -2,15 +2,14 @@
 /* Copyright (c) 2023 Amol Surati */
 
 /*
- * These are tokens for the parse tree.
- * Included after inc/cpp/tokens.h
+ * These are tokens for the parse tree. Included after inc/cpp/tokens.h.
+ * All of these are non-terminals.
  */
+
 DEF(TRANSLATION_OBJECT)
 DEF(TRANSLATION_UNIT)
 DEF(EXTERNAL_DECLARATION)
 DEF(PRIMARY_EXPRESSION)
-DEF(CONSTANT)
-DEF(STRING_LITERAL)
 DEF(EXPRESSION)
 DEF(GENERIC_SELECTION)
 DEF(ASSIGNMENT_EXPRESSION)

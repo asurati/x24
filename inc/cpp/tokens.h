@@ -15,10 +15,9 @@ DEF(UTF_16_STRING_LITERAL)
 DEF(UTF_32_STRING_LITERAL)
 DEF(WCHAR_T_STRING_LITERAL)
 
-DEF(NUMBER)	/* Uses within cpp. cc uses these 3 below */
+DEF(NUMBER)	/* Used within cpp. cc uses these 3 below */
 DEF(INTEGER_CONST)
-DEF(FLOAT_CONST)
-DEF(ENUM_CONST)
+DEF(FLOATING_CONST)
 
 /* Maintain order with g_punctuators */
 /* Single-char tokens */
