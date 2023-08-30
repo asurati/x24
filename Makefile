@@ -55,30 +55,18 @@ VFLAGS := --leak-check=full --show-leak-kinds=all --track-origins=yes
 VFLAGS += --verbose --log-file=/tmp/$(BIN).valgrind.txt
 
 CC := clang
-LD := ld
-AR := ar
-OC := objcopy
-OD := objdump
-CPP := clang-cpp
-
-ifneq ($(CROSS),)
-CC := $(CROSS)-$(CC)
-AR := $(CROSS)-$(AR)
-OC := $(CROSS)-$(OC)
-OD := $(CROSS)-$(OD)
-CPP := $(CROSS)-$(CPP)
-endif
+AR := llvm-ar
 
 RM := rm --one-file-system --preserve-root=all
 
 INC := -I$(SRC_PATH)
 
+LDFLAGS :=
 ARFLAGS += --thin -r -cvsP
 
 # c11 for uchar.h
-XFLAGS += $(INC) -std=c11 -MMD -MP
-CPPFLAGS += -P -x assembler-with-cpp $(XFLAGS)
-CFLAGS += -c -O0 -g -pedantic-errors $(XFLAGS) -Werror -Wfatal-errors
+CFLAGS := -I $(SRC_PATH) -std=c11 -MMD -MP
+CFLAGS += -c -O3 -g -pedantic-errors -Werror -Wfatal-errors
 CFLAGS += -Wall -Wextra -Wshadow -Wpedantic -Wcast-align
 CFLAGS += -fno-common -fno-exceptions -fno-unwind-tables
 CFLAGS += -fno-asynchronous-unwind-tables -fsigned-char
@@ -87,10 +75,10 @@ CFLAGS += -fno-asynchronous-unwind-tables -fsigned-char
 # CFLAGS += -fno-omit-frame-pointer -fno-optimize-sibling-calls
 # CFLAGS += -fsanitize=address
 # Build/Link:
-# $(CC) $^ -fsanitize=address -static-libsan -o $@
+# LDFLAGS += -fsanitize=address -static-libsan
 
 # These exports are needed by the BUILD command.
-export CC CPP AR CFLAGS CPPFLAGS ARFLAGS BIN_AR
+export CC AR CFLAGS ARFLAGS BIN_AR
 
 # Building commands
 BUILD := -f $(SRC_PATH)/build.mk DIR
@@ -102,8 +90,7 @@ all: $(BIN)
 	@:
 
 $(BIN): $(BIN_AR)
-	#$(CC) $^ -fsanitize=address -static-libsan -o $@
-	$(CC) $^ -o $@
+	$(CC) $(LDFLAGS) $^ -o $@
 
 $(BIN_AR): $(DIRS)
 	@:

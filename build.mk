@@ -38,9 +38,6 @@ $(SUBDIRS):
 	$(MAKE) $(BUILD)=$@
 
 # make can find the prereqs because of VPATH := $(SRC_PATH)
-$(OBJDIR)/%.S.o: $(SRCDIR)/%.S
-	$(CC) $(CFLAGS) $< -o $@
-
 $(OBJDIR)/%.c.o: $(SRCDIR)/%.c
 	$(CC) $(CFLAGS) $< -o $@
 	$(AR) $(ARFLAGS) $(BIN_AR) $@
