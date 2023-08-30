@@ -483,7 +483,7 @@ void cleanup()
  */
 void serialize()
 {
-	int i, j, k;
+	int i, j;
 	int fd;
 	const struct element *e[2];
 	const struct rule *r;
@@ -505,34 +505,33 @@ void serialize()
 	write(fd, &j, sizeof(j));	/* # of non-terminals */
 
 	/* Write in order of cc_token_type */
-	i = 0;
+	e[0] = NULL;
 	type = CC_TOKEN_TRANSLATION_OBJECT;
-	while (i < num_elements) {
-		for (j = 0; j < num_elements; ++j) {
-			e[0] = &elements[j];
+	while (type <= CC_TOKEN_FUNCTION_BODY) {
+		for (i = 0; i < num_elements; ++i) {
+			e[0] = &elements[i];
 			if (is_terminal(e[0]->type))
 				continue;
 			if (e[0]->type != type)
 				continue;
 			break;
 		}
-		if (j == num_elements)
+		if (i == num_elements)
 			break;
 		write(fd, &e[0]->type, sizeof(e[0]->type));
 		assert(e[0]->num_rules);
 		write(fd, &e[0]->num_rules, sizeof(e[0]->num_rules));
-		for (j = 0; j < e[0]->num_rules; ++j) {
-			r = &e[0]->rules[j];
+		for (i = 0; i < e[0]->num_rules; ++i) {
+			r = &e[0]->rules[i];
 			assert(r->num_rhs);
 			write(fd, &r->num_rhs, sizeof(r->num_rhs));
 			/* Convert element index into type while writing */
-			for (k = 0; k < r->num_rhs; ++k) {
-				e[1] = &elements[r->rhs[k]];
+			for (j = 0; j < r->num_rhs; ++j) {
+				e[1] = &elements[r->rhs[j]];
 				write(fd, &e[1]->type, sizeof(e[1]->type));
 			}
 		}
 		++type;
-		++i;
 	}
 	close(fd);
 }
