@@ -15,7 +15,7 @@ int main(int argc, char **argv)
 	err_t err;
 	const char *path;
 	struct scanner *scanner;
-	//struct compiler *compiler;
+	struct compiler *compiler;
 
 	if (argc != 2) {
 		printf("Usage: %s path.to.src.c\n", argv[0]);
@@ -38,7 +38,7 @@ int main(int argc, char **argv)
 	}
 	scanner_delete(scanner);
 	scanner = NULL;
-#if 0
+
 	err = compiler_new(path, &compiler);	/* path owned by compiler */
 	if (err)
 		goto err1;
@@ -47,7 +47,6 @@ int main(int argc, char **argv)
 err2:
 	if (compiler)
 		compiler_delete(compiler);
-#endif
 err1:
 	if (scanner)
 		scanner_delete(scanner);
