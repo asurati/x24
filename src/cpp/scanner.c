@@ -25,30 +25,30 @@ err_t cpp_token_stream_remove_head(struct cpp_token_stream *this,
 								   struct cpp_token **out);
 static
 err_t scanner_expand_argument(struct scanner *this,
-							  const struct queue *arg,
-							  struct queue *out);
+							  const struct cpp_tokens *arg,
+							  struct cpp_tokens *out);
 static
 err_t scanner_process_one(struct scanner *this,
-						  struct queue *mstk,
+						  struct ptr_queue *mstk,
 						  struct cpp_token_stream *stream,
-						  struct queue *out);
+						  struct ptr_queue *out);
 static
 err_t scanner_arg_substitution(struct scanner *this,
 							   const struct macro *macro,
-							   const struct queue *args,
-							   const struct queue *exp_args,
+							   const struct ptr_queue *args,
+							   const struct ptr_queue *exp_args,
 							   const int num_args,
-							   struct queue *repl,
-							   struct queue *out);
+							   struct ptr_queue *repl,
+							   struct ptr_queue *out);
 static
 err_t scanner_arg_substitution_one(struct scanner *this,
 								   const struct macro *macro,
-								   const struct queue *args,
-								   const struct queue *exp_args,
+								   const struct ptr_queue *args,
+								   const struct ptr_queue *exp_args,
 								   const int num_args,
 								   const bool is_pasting,
-								   struct queue *repl,
-								   struct queue *out);
+								   struct ptr_queue *repl,
+								   struct ptr_queue *out);
 #if 0
 static
 int __attribute__((noinline)) break_point_func() {return 0;}
@@ -76,8 +76,9 @@ err_t scanner_new(struct scanner **out)
 	if (this == NULL)
 		return ENOMEM;
 
-	queue_init(&this->macros, sizeof(void *), macro_delete);
-	queue_init(&this->cistk, sizeof(struct cond_incl_stack_entry), NULL);
+	ptrq_init(&this->macros, macro_delete);
+	valq_init(&this->cistk, sizeof(struct cond_incl_stack_entry),
+			  cond_incl_stack_entry_delete);
 
 	this->cpp_tokens_path = NULL;
 	this->cpp_tokens_fd = -1;
@@ -109,8 +110,8 @@ err_t scanner_delete(struct scanner *this)
 	/*unlink(this->cpp_tokens_path);*/
 	free((void *)this->cpp_tokens_path);
 
-	assert(queue_num_entries(&this->cistk) == 0);
-	queue_empty(&this->macros);
+	assert(valq_num_entries(&this->cistk) == 0);
+	ptrq_empty(&this->macros);
 	free(this);
 	return ESUCCESS;
 }
@@ -126,12 +127,10 @@ int scanner_find_macro_index(const struct scanner *this,
 {
 	int i;
 	const char *name[2];
-	const struct macro *macro, **entry;
+	const struct macro *macro;
 
 	name[0] = ident;
-	QUEUE_FOR_EACH(&this->macros, i, entry) {
-		assert(entry);
-		macro = *entry;
+	PTRQ_FOR_EACH(&this->macros, i, macro) {
 		assert(macro);
 		name[1] = cpp_token_resolved(macro->identifier);
 		if (!strcmp(name[0], name[1]))
@@ -147,7 +146,7 @@ const struct macro *scanner_find_macro(const struct scanner *this,
 	int i = scanner_find_macro_index(this, ident);
 	if (i < 0)
 		return NULL;
-	return *(const struct macro **)queue_peek_entry(&this->macros, i);
+	return ptrq_peek_entry(&this->macros, i);
 }
 /*****************************************************************************/
 /* During deletion, take care to not free static mem */
@@ -265,25 +264,23 @@ err_t cpp_token_new_place_marker(const bool has_white_space,
 /*****************************************************************************/
 /* out init by the caller */
 static
-err_t cpp_tokens_copy(const struct queue *this,
-					  struct queue *out)
+err_t cpp_tokens_copy(const struct ptr_queue *this,
+					  struct ptr_queue *out)
 {
 	int i;
 	err_t err;
-	struct cpp_token *t, *token, **entry;
+	struct cpp_token *t, *token;
 
 	assert(this->delete == cpp_token_delete);
-	QUEUE_FOR_EACH(this, i, entry) {
-		assert(entry);
-		t = *entry;
+	PTRQ_FOR_EACH(this, i, t) {
 		assert(t);
 		err = cpp_token_copy(t, &token);
 		if (!err)
-			err = queue_add_tail(out, &token);
+			err = ptrq_add_tail(out, token);
 		if (err)
 			return err;
 	}
-	assert(i == queue_num_entries(this));
+	assert(i == ptrq_num_entries(this));
 	return ESUCCESS;
 }
 
@@ -292,29 +289,25 @@ err_t cpp_tokens_copy(const struct queue *this,
  * A marker that is removed donates its npws to the token that follows.
  */
 static
-err_t cpp_tokens_remove_place_markers(struct queue *this)
+err_t cpp_tokens_remove_place_markers(struct ptr_queue *this)
 {
 	err_t err;
-	int i;
-	struct cpp_token *token, **entry;
-	struct queue out;
+	struct cpp_token *token;
+	struct ptr_queue out;
 
-	cpp_token_queue_init(&out);
-	QUEUE_FOR_EACH(this, i, entry) {
-		assert(entry);
-		token = *entry;	/* Read the q-entry. q-entry can now be removed */
+	ptrq_init(&out, cpp_token_delete);
+	PTRQ_FOR_EACH_WITH_REMOVE(this, token) {
 		assert(token);
-		queue_remove_entry(this, i);
 		if (cpp_token_type(token) == LXR_TOKEN_PLACE_MARKER) {
 			cpp_token_delete(token);
 			continue;
 		}
-		err = queue_add_tail(&out, &token);
+		err = ptrq_add_tail(&out, token);
 		if (err)
 			return err;
 	}
-	assert(queue_is_empty(this));
-	return queue_move(&out, this);
+	assert(ptrq_is_empty(this));
+	return ptrq_move(&out, this);
 }
 /*****************************************************************************/
 /* no ref change on base when token is placed/removed from queues, etc. */
@@ -328,7 +321,7 @@ err_t cpp_token_stream_peek_head(struct cpp_token_stream *this,
 	struct cpp_token *token;
 
 	if (!cpp_token_stream_is_empty(this)) {
-		*out = queue_peek_head(&this->tokens);
+		*out = ptrq_peek_head(&this->tokens);
 		return ESUCCESS;
 	}
 
@@ -341,7 +334,7 @@ err_t cpp_token_stream_peek_head(struct cpp_token_stream *this,
 	if (!err)
 		err = cpp_token_new(base, &token);	/* move lexer's ref */
 	if (!err)
-		err = queue_add_tail(&this->tokens, token);
+		err = ptrq_add_tail(&this->tokens, token);
 	if (!err)
 		*out = token;
 	return err;
@@ -357,7 +350,7 @@ err_t cpp_token_stream_remove_head(struct cpp_token_stream *this,
 	err = cpp_token_stream_peek_head(this, out);
 	if (err)
 		return err;
-	token = queue_remove_head(&this->tokens);
+	token = ptrq_remove_head(&this->tokens);
 	assert(token == *out);
 	return err;
 }
@@ -365,10 +358,10 @@ err_t cpp_token_stream_remove_head(struct cpp_token_stream *this,
 static
 void macro_delete(void *p)
 {
-	struct macro *this = *(struct macro **)p;
+	struct macro *this = p;
 	cpp_token_delete(this->identifier);
-	queue_empty(&this->parameters);
-	queue_empty(&this->replacement_list);
+	ptrq_empty(&this->parameters);
+	ptrq_empty(&this->replacement_list);
 	free(this);
 }
 
@@ -387,22 +380,22 @@ bool macro_are_identical(const struct macro *m[2])
 	if (m[0]->is_variadic != m[1]->is_variadic)
 		return false;
 
-	num_params[0] = queue_num_entries(&m[0]->parameters);
-	num_params[1] = queue_num_entries(&m[1]->parameters);
+	num_params[0] = ptrq_num_entries(&m[0]->parameters);
+	num_params[1] = ptrq_num_entries(&m[1]->parameters);
 	if (num_params[0] != num_params[1])
 		return false;
 
-	num_repl_tokens[0] = queue_num_entries(&m[0]->replacement_list);
-	num_repl_tokens[1] = queue_num_entries(&m[1]->replacement_list);
+	num_repl_tokens[0] = ptrq_num_entries(&m[0]->replacement_list);
+	num_repl_tokens[1] = ptrq_num_entries(&m[1]->replacement_list);
 	if (num_repl_tokens[0] != num_repl_tokens[1])
 		return false;
 
 	/* Check param-names */
 	for (i = 0; i < num_params[0]; ++i) {
-		token = queue_peek_entry(&m[0]->parameters, i);
+		token = ptrq_peek_entry(&m[0]->parameters, i);
 		len[0] = cpp_token_resolved_length(token);
 		str[0] = cpp_token_resolved(token);
-		token = queue_peek_entry(&m[1]->parameters, i);
+		token = ptrq_peek_entry(&m[1]->parameters, i);
 		len[1] = cpp_token_resolved_length(token);
 		str[1] = cpp_token_resolved(token);
 		if (len[0] != len[1] || strcmp(str[0], str[1]))
@@ -411,11 +404,11 @@ bool macro_are_identical(const struct macro *m[2])
 
 	/* Check repl-lists */
 	for (i = 0; i < num_repl_tokens[0]; ++i) {
-		token = queue_peek_entry(&m[0]->replacement_list, i);
+		token = ptrq_peek_entry(&m[0]->replacement_list, i);
 		len[0] = cpp_token_resolved_length(token);
 		str[0] = cpp_token_resolved(token);
 		ws[0] = cpp_token_has_white_space(token);
-		token = queue_peek_entry(&m[1]->replacement_list, i);
+		token = ptrq_peek_entry(&m[1]->replacement_list, i);
 		len[1] = cpp_token_resolved_length(token);
 		str[1] = cpp_token_resolved(token);
 		ws[1] = cpp_token_has_white_space(token);
@@ -427,7 +420,7 @@ bool macro_are_identical(const struct macro *m[2])
 
 static
 err_t macro_scan_parameters(struct macro *this,
-							struct queue *line)
+							struct ptr_queue *line)
 {
 	err_t err;
 	int len[2], num_params, i, j;
@@ -437,21 +430,21 @@ err_t macro_scan_parameters(struct macro *this,
 	enum lexer_token_type type;
 
 	/* There should be at least a closing paren */
-	if (queue_is_empty(line))
+	if (ptrq_is_empty(line))
 		return EINVAL;
 
 	/* No parameters */
-	token = queue_peek_head(line);
+	token = ptrq_peek_head(line);
 	type = cpp_token_type(token);
 	if (type == LXR_TOKEN_RIGHT_PAREN) {
-		queue_delete_head(line);
+		ptrq_delete_head(line);
 		return ESUCCESS;
 	}
 
 	was_prev_comma = true;	/* so that we start with ident */
 	closed = false;
-	while (!queue_is_empty(line)) {
-		token = queue_remove_head(line);
+	while (!ptrq_is_empty(line)) {
+		token = ptrq_remove_head(line);
 		type = cpp_token_type(token);
 
 		if (this->is_variadic && type != LXR_TOKEN_RIGHT_PAREN)
@@ -485,7 +478,7 @@ err_t macro_scan_parameters(struct macro *this,
 				this->is_variadic = true;
 
 			/* token's ref on base remains intact. */
-			err = queue_add_tail(&this->parameters, token);
+			err = ptrq_add_tail(&this->parameters, token);
 			if (err)
 				return err;
 			continue;
@@ -503,7 +496,7 @@ err_t macro_scan_parameters(struct macro *this,
 		return EINVAL;
 
 	/* each parameter must be uniquely named among the parameters. */
-	num_params = queue_num_entries(&this->parameters);
+	num_params = ptrq_num_entries(&this->parameters);
 	assert(num_params);
 
 	/* No need to check ellipsis. */
@@ -511,11 +504,11 @@ err_t macro_scan_parameters(struct macro *this,
 		--num_params;
 
 	for (i = 0; i < num_params - 1; ++i) {
-		token = queue_peek_entry(&this->parameters, i);
+		token = ptrq_peek_entry(&this->parameters, i);
 		len[0] = cpp_token_resolved_length(token);
 		str[0] = cpp_token_resolved(token);
 		for (j = i + 1; j < num_params; ++j) {
-			token = queue_peek_entry(&this->parameters, j);
+			token = ptrq_peek_entry(&this->parameters, j);
 			len[1] = cpp_token_resolved_length(token);
 			str[1] = cpp_token_resolved(token);
 			if (len[0] != len[1] || strcmp(str[0], str[1]))
@@ -528,20 +521,21 @@ err_t macro_scan_parameters(struct macro *this,
 
 static
 err_t macro_scan_replacement_list(struct macro *this,
-								  struct queue *line)
+								  struct ptr_queue *line)
 {
+	err_t err;
 	bool is_first;
 	struct cpp_token *token;
 	enum lexer_token_type type;
 
 	/* Empty is allowed */
-	if (queue_is_empty(line))
+	if (ptrq_is_empty(line))
 		return ESUCCESS;
 
 	is_first = true;
 	type = LXR_TOKEN_INVALID;
-	while (!queue_is_empty(line)) {
-		token = queue_remove_head(line);
+	while (!ptrq_is_empty(line)) {
+		token = ptrq_remove_head(line);
 		type = cpp_token_type(token);
 
 		/* token-pasting cannot be the first token in a repl-list. */
@@ -575,7 +569,9 @@ err_t macro_scan_replacement_list(struct macro *this,
 		 */
 		if (is_first)
 			token->has_white_space = false;
-		queue_add_tail(&this->replacement_list, token);
+		err = ptrq_add_tail(&this->replacement_list, token);
+		if (err)
+			return err;
 		is_first = false;
 	}
 	/* token-pasting cannot be the last token in a repl-list. */
@@ -593,7 +589,7 @@ int macro_find_parameter(const struct macro *this,
 	const struct cpp_token *token;
 
 	name[0] = ident;
-	queue_for_each(&this->parameters, i, token) {
+	PTRQ_FOR_EACH(&this->parameters, i, token) {
 		name[1] = cpp_token_resolved(token);
 		if (!strcmp(name[0], name[1]))
 			return i;
@@ -686,7 +682,7 @@ err0:
 
 static
 err_t scanner_scan_directive_include(struct scanner *this,
-									 struct queue *line,
+									 struct ptr_queue *line,
 									 const char *dir_path)
 {
 	err_t err;
@@ -695,17 +691,17 @@ err_t scanner_scan_directive_include(struct scanner *this,
 	const char *name;
 	char *str;
 	struct cpp_token *token;
-	struct queue tokens;
-	struct queue exp_line;
+	struct ptr_queue tokens;
+	struct ptr_queue exp_line;
 	enum lexer_token_type type;
 
-	if (queue_is_empty(line))	/* no file-name */
+	if (ptrq_is_empty(line))	/* no file-name */
 		return EINVAL;
 
-	queue_init(&exp_line, cpp_token_delete);
-	queue_init(&tokens, cpp_token_delete);
+	ptrq_init(&exp_line, cpp_token_delete);
+	ptrq_init(&tokens, cpp_token_delete);
 
-	token = queue_peek_head(line);
+	token = ptrq_peek_head(line);
 	type = cpp_token_type(token);
 	if (type == LXR_TOKEN_CHAR_STRING_LITERAL) {
 		name = cpp_token_source(token);

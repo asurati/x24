@@ -62,7 +62,7 @@ char *strdup(const char *str)
 }
 /*****************************************************************************/
 static
-err_t queue_realloc(struct queue *this)
+err_t ptrq_realloc(struct ptr_queue *this)
 {
 	int num_entries_allocated, num_allocate;
 	size_t size;
@@ -92,41 +92,39 @@ err_t queue_realloc(struct queue *this)
 
 	num_entries_allocated = this->num_entries_allocated;	/* save */
 	this->num_entries_allocated += num_allocate;
-	size = this->num_entries_allocated * this->entry_size;
+	size = this->num_entries_allocated * sizeof(void *);
 	this->entries = realloc(this->entries, size);
 	if (this->entries == NULL)
 		return ENOMEM;
 
 	/* Move the pointers [0, r-1] to [prev-nia, prev-nia + r - 1] */
-	memcpy(this->entries + num_entries_allocated * this->entry_size,
+	memcpy(this->entries + num_entries_allocated * sizeof(void *),
 		   this->entries,
-		   this->read * this->entry_size);
+		   this->read * sizeof(void *));
 	return ESUCCESS;
 }
+
 /*
- * queue of pointers. one slot is always kept empty.
+ * queue of pointers.
  * read pointer is set to 0, and num_entries is set to 0.
- * read pointer points to the entry last read.
- * to add to the tail/backof the queue:
- *    the new position is read + num_entries + 1 mod num_entries_allocated;
- *    if the new position is same as read, we are full, and must reallocate.
- *    if queue is not full, store at r, set r to r-1, incr. num_entries.
+ * read + num_entries point to the location which will get written next.
+ * read points to the location which will be read next.
+ * to add to the tail/back of the queue:
+ *    the new position is read + num_entries mod num_entries_allocated;
  */
-err_t queue_add_tail(struct queue *this,
-					 const void *entry)
+err_t ptrq_add_tail(struct ptr_queue *this,
+					void *entry)
 {
 	err_t err;
 	int pos;
 
 	err = ESUCCESS;
-	if (queue_is_full(this))
-		err = queue_realloc(this);
+	if (ptrq_is_full(this))
+		err = ptrq_realloc(this);
 	if (err)
 		return err;
 	pos = (this->read + this->num_entries) % this->num_entries_allocated;
-	memcpy(this->entries + pos * this->entry_size,
-		   entry,
-		   this->entry_size);
+	this->entries[pos] = entry;
 	++this->num_entries;
 	return ESUCCESS;
 }
@@ -136,34 +134,31 @@ err_t queue_add_tail(struct queue *this,
  *    if the queue is full, then expand, store at r and set r to r-1, incr
  *    num_entries.
  */
-err_t queue_add_head(struct queue *this,
-					 const void *entry)
+err_t ptrq_add_head(struct ptr_queue *this,
+					void *entry)
 {
 	err_t err;
 
 	err = ESUCCESS;
-	if (queue_is_full(this))
-		err = queue_realloc(this);
+	if (ptrq_is_full(this))
+		err = ptrq_realloc(this);
 	if (err)
 		return err;
 	--this->read;
 	if (this->read == -1)
 		this->read += this->num_entries_allocated;
 	assert(0 <= this->read && this->read < this->num_entries_allocated);
-	memcpy(this->entries + this->read * this->entry_size,
-		   entry,
-		   this->entry_size);
+	this->entries[this->read] = entry;
 	++this->num_entries;
 	return ESUCCESS;
 }
 
-void queue_remove_entry(struct queue *this,
+void *ptrq_remove_entry(struct ptr_queue *this,
 						const int index)
 {
-	int i, num_entries, read, write;
-
+	int num_entries, read, write, i;
+	void *entry = ptrq_peek_entry(this, index);
 	assert(this->num_entries);
-	/* head or tail removal are simple */
 	if (index == 0 || index == this->num_entries - 1) {
 		if (index == 0) {
 			++this->read;
@@ -185,30 +180,93 @@ void queue_remove_entry(struct queue *this,
 	for (i = 0; i < num_entries; ++i, ++read, ++write) {
 		read %= this->num_entries_allocated;
 		write %= this->num_entries_allocated;
-		memcpy(this->entries + write * this->entry_size,
-			   this->entries + read * this->entry_size,
-			   this->entry_size);
+		this->entries[write] = this->entries[read];
 	}
 done:
 	if (--this->num_entries)
-		return;
+		return entry;
 	free(this->entries);
-	queue_init(this, this->entry_size, this->delete);
+	ptrq_init(this, this->delete);
+	return entry;
+}
+/*****************************************************************************/
+static
+err_t valq_realloc(struct val_queue *this)
+{
+	int num_entries_allocated, num_allocate;
+	size_t size;
+
+	assert(this->read >= 0);
+	num_allocate = this->read + 0xf;
+	num_allocate &= ~0xf;
+	if (num_allocate == 0)
+		num_allocate = 16;
+	num_entries_allocated = this->num_entries_allocated;	/* save */
+	this->num_entries_allocated += num_allocate;
+	size = this->num_entries_allocated * this->entry_size;
+	this->entries = realloc(this->entries, size);
+	if (this->entries == NULL)
+		return ENOMEM;
+	/* Move the values [0, r-1] to [prev-nea, prev-nea + r - 1] */
+	memcpy(this->entries + num_entries_allocated * this->entry_size,
+		   this->entries,
+		   this->read * this->entry_size);
+	return ESUCCESS;
 }
 
-err_t queue_move(struct queue *this,
-				 struct queue *to)
+err_t valq_add_tail(struct val_queue *this,
+					const void *entry)
 {
 	err_t err;
-	void *entry;
+	int pos;
 
-	while (!queue_is_empty(this)) {
-		entry = queue_peek_head(this);
-		err = queue_add_tail(to, entry);
-		if (err)
-			return err;
-		/* Do not call delete. We are just moving entries */
-		queue_remove_head(this);
-	}
+	err = ESUCCESS;
+	if (valq_is_full(this))
+		err = valq_realloc(this);
+	if (err)
+		return err;
+	pos = (this->read + this->num_entries) % this->num_entries_allocated;
+	memcpy(this->entries + pos * this->entry_size,
+		   entry,
+		   this->entry_size);
+	++this->num_entries;
 	return ESUCCESS;
+}
+
+err_t valq_add_head(struct val_queue *this,
+					const void *entry)
+{
+	err_t err;
+
+	err = ESUCCESS;
+	if (valq_is_full(this))
+		err = valq_realloc(this);
+	if (err)
+		return err;
+	--this->read;
+	if (this->read == -1)
+		this->read += this->num_entries_allocated;
+	assert(0 <= this->read && this->read < this->num_entries_allocated);
+	memcpy(this->entries + this->read * this->entry_size,
+		   entry,
+		   this->entry_size);
+	++this->num_entries;
+	return ESUCCESS;
+}
+
+void valq_remove_entry(struct val_queue *this,
+					   const int index)
+{
+	assert(this->num_entries);
+	assert(index == 0 || index == this->num_entries - 1);
+	/* Removal in the middle not supported for valq */
+
+	if (index == 0) {
+		++this->read;
+		this->read %= this->num_entries_allocated;
+	}
+	if (--this->num_entries)
+		return;
+	free(this->entries);
+	valq_init(this, this->entry_size, this->delete);
 }

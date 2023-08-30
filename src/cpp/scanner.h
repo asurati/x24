@@ -86,16 +86,150 @@ bool cpp_token_is_marked(const struct cpp_token *this)
 
 static
 void cpp_token_delete(void *p);
+/*****************************************************************************/
+struct cpp_tokens {
+	struct ptr_queue	tokens;
+};
+
+#define CPP_TOKENS_FOR_EACH(q, ix, e)	\
+	PTRQ_FOR_EACH(&q->tokens, ix, e)
+
+#define CPP_TOKENS_FOR_EACH_WITH_REMOVE(q, ix, e)	PTRQ_FOR_EACH(&q->tokens, ix, e)
+
+#define PTRQ_FOR_EACH_WITH_REMOVE(q, e)	\
+	while ((e = ptrq_is_empty(q) ? NULL : ptrq_remove_head(q)))
+
+#define PTRQ_FOR_EACH_REVERSE(q, ix, e)	\
+	for (ix = ptrq_num_entries(q) - 1;	\
+		 e = ix >= 0 ? ptrq_peek_entry(q, ix) : NULL; --ix)
+
+#define PTRQ_FOR_EACH_WITH_REMOVE_REVERSE(q, e)	\
+	while (e = ptrq_is_empty(q) ? NULL : ptrq_remove_tail(q))
 
 static inline
-void cpp_token_queue_init(struct queue *this)
+void ptrq_init(struct ptr_queue *this,
+			   fn_ptrq_delete_entry *delete)
 {
-	queue_init(this, sizeof(void *), cpp_token_delete);
+	this->num_entries_allocated = this->num_entries = this->read = 0;
+	this->delete = delete;
+	this->entries = NULL;
 }
+
+static inline
+bool ptrq_is_empty(const struct ptr_queue *this)
+{
+	return this->num_entries == 0;
+}
+
+static inline
+bool ptrq_is_full(const struct ptr_queue *this)
+{
+	return this->num_entries == this->num_entries_allocated;
+}
+
+static inline
+int ptrq_num_entries(const struct ptr_queue *this)
+{
+	return this->num_entries;
+}
+
+/* Returns this->entries[index] and not &this->entries[index] */
+static inline
+void *ptrq_peek_entry(const struct ptr_queue *this,
+					  const int index)
+{
+	int pos;
+	assert(0 <= index && index < this->num_entries);
+	pos = (this->read + index) % this->num_entries_allocated;
+	return this->entries[pos];
+}
+
+static inline
+bool ptrq_find(const struct ptr_queue *this,
+			   const void *entry)
+{
+	int i;
+	for (i = 0; i < this->num_entries; ++i) {
+		if (this->entries[i] == entry)
+			return true;
+	}
+	return false;
+}
+
+static inline
+void ptrq_delete_entry(struct ptr_queue *this,
+					   const int index)
+{
+	this->delete(ptrq_peek_entry(this, index));
+	ptrq_remove_entry(this, index);
+}
+
+static inline
+void *ptrq_peek_head(struct ptr_queue *this)
+{
+	assert(!ptrq_is_empty(this));
+	return ptrq_peek_entry(this, 0);
+}
+
+static inline
+void *ptrq_peek_tail(struct ptr_queue *this)
+{
+	assert(!ptrq_is_empty(this));
+	return ptrq_peek_entry(this, this->num_entries - 1);
+}
+
+static inline
+void *ptrq_remove_head(struct ptr_queue *this)
+{
+	assert(!ptrq_is_empty(this));
+	return ptrq_remove_entry(this, 0);
+}
+
+static inline
+void *ptrq_remove_tail(struct ptr_queue *this)
+{
+	assert(!ptrq_is_empty(this));
+	return ptrq_remove_entry(this, this->num_entries - 1);
+}
+
+static inline
+void ptrq_delete_head(struct ptr_queue *this)
+{
+	assert(!ptrq_is_empty(this));
+	ptrq_delete_entry(this, 0);
+}
+
+static inline
+void ptrq_delete_tail(struct ptr_queue *this)
+{
+	assert(!ptrq_is_empty(this));
+	ptrq_delete_entry(this, this->num_entries - 1);
+}
+
+static inline
+void ptrq_empty(struct ptr_queue *this)
+{
+	while (!ptrq_is_empty(this))
+		ptrq_delete_head(this);
+}
+
+static inline
+err_t ptrq_move(struct ptr_queue *this,
+				struct ptr_queue *to)
+{
+	err_t err;
+	while (!ptrq_is_empty(this)) {
+		err = ptrq_add_tail(to, ptrq_remove_head(this));
+		if (err)
+			return err;
+	}
+	return ESUCCESS;
+}
+
 /*****************************************************************************/
 struct cpp_token_stream {
-	struct lexer	*lexer;
-	struct queue	tokens;	/* Each q-entry is a cpp_token* */
+	struct lexer		*lexer;
+	struct cpp_tokens	tokens;
 };
 
 static inline
@@ -103,33 +237,33 @@ void cpp_token_stream_init(struct cpp_token_stream *this,
 						   struct lexer *lexer)
 {
 	this->lexer = lexer;
-	queue_init(&this->tokens, sizeof(void *), cpp_token_delete);
+	ptrq_init(&this->tokens, cpp_token_delete);
 }
 
 static inline
 bool cpp_token_stream_is_empty(const struct cpp_token_stream *this)
 {
-	return queue_is_empty(&this->tokens);
+	return ptrq_is_empty(&this->tokens);
 }
 
 static inline
 err_t cpp_token_stream_add_tail(struct cpp_token_stream *this,
 								struct cpp_token *token)
 {
-	return queue_add_tail(&this->tokens, token);
+	return ptrq_add_tail(&this->tokens, token);
 }
 
 static inline
 err_t cpp_token_stream_add_head(struct cpp_token_stream *this,
 								struct cpp_token *token)
 {
-	return queue_add_head(&this->tokens, token);
+	return ptrq_add_head(&this->tokens, token);
 }
 /*****************************************************************************/
 struct macro {
 	struct cpp_token	*identifier;
-	struct queue	parameters;
-	struct queue	replacement_list;
+	struct ptr_queue	parameters;
+	struct ptr_queue	replacement_list;
 	bool	is_function_like;
 	bool	is_variadic;
 };
@@ -157,6 +291,12 @@ struct cond_incl_stack_entry {
 	enum lexer_token_type	type;	/* only if and else. elif == if */
 	enum cond_incl_state	state;
 };
+
+static inline
+void cond_incl_stack_entry_delete(void *p)
+{
+	(void)p;
+}
 /*****************************************************************************/
 /* low-value, high-precedence */
 struct rpn_operator_precedence {
@@ -233,12 +373,12 @@ struct rpn_stack_entry {
 };
 /*****************************************************************************/
 struct scanner {
-	struct queue	macros;	/* Each q-entry is a macro* */
+	struct ptr_queue	macros;	/* Each q-entry is a macro* */
 
 	/*
 	 * Conditional Inclusion Stack.
 	 * Each q-entry is cond_incl_stack_entry obj */
-	struct queue	cistk;
+	struct val_queue	cistk;
 
 	const char	*include_paths[4];
 	const char	*predefined_macros_path;
