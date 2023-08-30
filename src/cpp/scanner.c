@@ -3210,20 +3210,7 @@ err_t scanner_serialize_cpp_token(struct scanner *this,
 	if (ret < 0)
 		return errno;
 
-	/*
-	 * If the type is identifier, write its resolved source.
-	 * Note that strings and char-consts have not been resolved yet, because
-	 * they do not need to at the cpp stage. Only those char-consts subjected
-	 * to #if constructs are evaluated, but otherwise the char-consts are not
-	 * resolved.
-	 */
 	src_len = cpp_token_source_length(token);
-	buf = cpp_token_source(token);
-	if (type == LXR_TOKEN_IDENTIFIER &&
-		cpp_token_resolved(token) != cpp_token_source(token)) {
-		src_len = cpp_token_resolved_length(token);
-		buf = cpp_token_resolved(token);
-	}
 
 	/* Then write source_len */
 	buf = &src_len;
@@ -3236,7 +3223,21 @@ err_t scanner_serialize_cpp_token(struct scanner *this,
 	if (src_len == 0)
 		return ESUCCESS;
 
+	/*
+	 * If the type is identifier, write its resolved source.
+	 * Note that strings and char-consts have not been resolved yet, because
+	 * they do not need to at the cpp stage. Only those char-consts subjected
+	 * to #if constructs are evaluated, but otherwise the char-consts are not
+	 * resolved.
+	 */
+
 	size = src_len;
+	buf = cpp_token_source(token);
+	if (type == LXR_TOKEN_IDENTIFIER &&
+		cpp_token_resolved(token) != cpp_token_source(token)) {
+		src_len = cpp_token_resolved_length(token);
+		buf = cpp_token_resolved(token);
+	}
 	assert(buf);
 	ret = write(this->cpp_tokens_fd, buf, size);
 	if (ret < 0)
