@@ -98,9 +98,11 @@ err_t ptrq_realloc(struct ptr_queue *this)
 		return ENOMEM;
 
 	/* Move the pointers [0, r-1] to [prev-nia, prev-nia + r - 1] */
-	memcpy(this->entries + num_entries_allocated * sizeof(void *),
-		   this->entries,
-		   this->read * sizeof(void *));
+	if (this->read) {
+		printf("%s: %d\n", __func__, this->read);
+		memcpy(&this->entries[num_entries_allocated], this->entries,
+			   this->read * sizeof(void *));
+	}
 	return ESUCCESS;
 }
 
@@ -208,9 +210,10 @@ err_t valq_realloc(struct val_queue *this)
 	if (this->entries == NULL)
 		return ENOMEM;
 	/* Move the values [0, r-1] to [prev-nea, prev-nea + r - 1] */
-	memcpy(this->entries + num_entries_allocated * this->entry_size,
-		   this->entries,
-		   this->read * this->entry_size);
+	if (this->read) {
+		memcpy(this->entries + num_entries_allocated * this->entry_size,
+			   this->entries, this->read * this->entry_size);
+	}
 	return ESUCCESS;
 }
 
@@ -226,9 +229,7 @@ err_t valq_add_tail(struct val_queue *this,
 	if (err)
 		return err;
 	pos = (this->read + this->num_entries) % this->num_entries_allocated;
-	memcpy(this->entries + pos * this->entry_size,
-		   entry,
-		   this->entry_size);
+	memcpy(this->entries + pos * this->entry_size, entry, this->entry_size);
 	++this->num_entries;
 	return ESUCCESS;
 }
@@ -247,8 +248,7 @@ err_t valq_add_head(struct val_queue *this,
 	if (this->read == -1)
 		this->read += this->num_entries_allocated;
 	assert(0 <= this->read && this->read < this->num_entries_allocated);
-	memcpy(this->entries + this->read * this->entry_size,
-		   entry,
+	memcpy(this->entries + this->read * this->entry_size, entry,
 		   this->entry_size);
 	++this->num_entries;
 	return ESUCCESS;
