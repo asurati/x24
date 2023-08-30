@@ -40,48 +40,36 @@ void cc_token_print(const struct cc_token *this)
 	printf("\n");
 }
 /*****************************************************************************/
-static
-void cc_grammar_rule_delete(struct cc_grammar_rule *this)
+void cc_grammar_rule_delete(void *p)
 {
-	free(this->elements);
-	/* Do not delete 'this; */
+	struct cc_grammar_rule *this = p;
+	free(this->elements.entries);
+}
+
+static inline
+void cc_grammar_element_delete(void *p)
+{
+	struct cc_grammar_element *this = p;
+	valq_empty(&this->rules);
+}
+
+void cc_grammar_item_delete(void *p)
+{
+	free(p);
 }
 
 static
-void cc_grammar_element_delete(struct cc_grammar_element *this)
+void cc_grammar_item_set_delete(void *p)
 {
-	int i;
-
-	for (i = 0; i < this->num_rules; ++i)
-		cc_grammar_rule_delete(&this->rules[i]);
-	free(this->rules);
-	/* do not delete 'this' */
+	struct cc_grammar_item_set *this = p;
+	ptrq_empty(&this->items);
 }
 
-static
-void cc_grammar_item_delete(struct cc_grammar_item *this)
-{
-	free(this->look_aheads);
-	/* do not delete 'this' */
-}
-
-static
-void cc_grammar_item_set_delete(struct cc_grammar_item_set *this)
-{
-	int i;
-
-	for (i = 0; i < this->num_kernel_items + this->num_closure_items; ++i)
-		cc_grammar_item_delete(&this->items[i]);
-	free(this->items);
-	/* do not delete 'this' */
-}
-
-static
 void cc_parse_node_delete(void *p)
 {
 	struct cc_parse_node *this = p;
-	free(this->token);
-	queue_empty(&this->child_nodes);
+	cc_token_delete(this->token);
+	ptrq_empty(&this->child_nodes);
 	free(this);
 }
 /*****************************************************************************/
@@ -125,12 +113,10 @@ err_t compiler_new(const char *path,
 	}
 	this->cpp_tokens_path = path;
 	this->cpp_tokens_fd = fd;
-	queue_init(&this->roots_stack, cc_parse_node_delete);
-	/*stack_init(&this->roots_stack);*/
-	stack_init(&this->parse_stack);
-	this->elements = NULL;
-	this->item_sets = NULL;
-	this->num_elements = this->num_item_sets = 0;
+	valq_init(&this->elements, sizeof(struct cc_grammar_element),
+			  cc_grammar_element_delete);
+	valq_init(&this->item_sets, sizeof(struct cc_grammar_item_set),
+			  cc_grammar_item_set_delete);
 	err = cc_load_grammar(this);
 	if (err)
 		goto err1;
@@ -145,8 +131,6 @@ err0:
 
 err_t compiler_delete(struct compiler *this)
 {
-	int i;
-
 	assert(this);
 	munmap((void *)this->stream.buffer, this->stream.buffer_size);
 	close(this->cpp_tokens_fd);
@@ -154,15 +138,8 @@ err_t compiler_delete(struct compiler *this)
 	free((void *)this->cpp_tokens_path);
 	cc_token_stream_empty(&this->stream);
 
-	for (i = 0; i < this->num_elements; ++i)
-		cc_grammar_element_delete(&this->elements[i]);
-	free(this->elements);
-	for (i = 0; i < this->num_item_sets; ++i)
-		cc_grammar_item_set_delete(&this->item_sets[i]);
-	free(this->item_sets);
-
-	queue_empty(&this->roots_stack);
-	assert(queue_is_empty(&this->parse_stack));
+	valq_empty(&this->elements);
+	valq_empty(&this->item_sets);
 	free(this);
 	return ESUCCESS;
 }
@@ -232,7 +209,7 @@ digits:
 			(i == str_len - 1 || !is_digit_in_radix(str[i + 1], radix)))
 			return EINVAL;
 
-		this->type = CC_TOKEN_FLOAT_CONST;
+		this->type = CC_TOKEN_FLOATING_CONST;
 		dot_seen = true;
 		num_digits = 0;	/* Can't have seperator imm. follow the dot */
 		was_prev_separator = false;
@@ -259,7 +236,7 @@ digits:
 
 	return EINVAL;
 exponent:
-	this->type = CC_TOKEN_FLOAT_CONST;
+	this->type = CC_TOKEN_FLOATING_CONST;
 	if (num_digits == 0 && dot_seen == false)
 		return EINVAL;
 	assert(radix == 10 || radix == 16);
@@ -278,7 +255,7 @@ exponent:
 		return EINVAL;	/* There must be at least one digit after exp. */
 	/* fall-thru */
 floating_suffix:
-	this->type = CC_TOKEN_FLOAT_CONST;
+	this->type = CC_TOKEN_FLOATING_CONST;
 	if (i == str_len)
 		return ESUCCESS;
 	if (str[i] == 'f' || str[i] == 'F' ||
@@ -389,7 +366,7 @@ err_t cc_token_stream_peek_head(struct cc_token_stream *this,
 	err_t err;
 
 	if (!cc_token_stream_is_empty(this)) {
-		*out = queue_peek_head(&this->tokens);
+		*out = ptrq_peek_head(&this->q);
 		return ESUCCESS;
 	}
 
@@ -398,7 +375,7 @@ err_t cc_token_stream_peek_head(struct cc_token_stream *this,
 		return EOF;
 	err = cc_token_stream_convert(this, out);
 	if (!err)
-		err = queue_add_tail(&this->tokens, *out);
+		err = ptrq_add_tail(&this->q, *out);
 	return err;
 }
 
@@ -412,7 +389,7 @@ err_t cc_token_stream_remove_head(struct cc_token_stream *this,
 	err = cc_token_stream_peek_head(this, out);
 	if (err)
 		return err;
-	token = queue_remove_head(&this->tokens);
+	token = ptrq_remove_head(&this->q);
 	assert(token == *out);
 	return err;
 }

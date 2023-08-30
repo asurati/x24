@@ -91,7 +91,7 @@ void cc_token_delete(void *this);
 struct cc_token_stream {
 	const char	*buffer;	/* file containing the cpp_tokens */
 	size_t		buffer_size;
-	struct queue	tokens;		/* Each entry is a cc_token* */
+	struct ptr_queue	q;
 };
 
 static inline
@@ -101,47 +101,48 @@ void cc_token_stream_init(struct cc_token_stream *this,
 {
 	this->buffer = buffer;
 	this->buffer_size = buffer_size;
-	queue_init(&this->tokens, sizeof(void *), cc_token_delete);
+	ptrq_init(&this->q, cc_token_delete);
 	/* Each entry in the queue is a pointer. */
 }
 
 static inline
 bool cc_token_stream_is_empty(const struct cc_token_stream *this)
 {
-	return queue_is_empty(&this->tokens);
+	return ptrq_is_empty(&this->q);
 }
 
 static inline
 err_t cc_token_stream_add_tail(struct cc_token_stream *this,
 							   struct cc_token *token)
 {
-	return queue_add_tail(&this->tokens, token);
+	return ptrq_add_tail(&this->q, token);
 }
 
 static inline
 err_t cc_token_stream_add_head(struct cc_token_stream *this,
 							   struct cc_token *token)
 {
-	return queue_add_head(&this->tokens, token);
+	return ptrq_add_head(&this->q, token);
 }
 
 static inline
 void cc_token_stream_empty(struct cc_token_stream *this)
 {
-	queue_empty(&this->tokens);
+	ptrq_empty(&this->q);
 }
 /*****************************************************************************/
 struct cc_grammar_rule {
-	struct queue	rules;	/* the first int is lhs, rest is rhs */
+	struct val_queue	elements;	/* the first int is lhs, rest is rhs */
 };
+
+void cc_grammar_rule_delete(void *p);
 
 /* terminals + non-terminals. rules valid for non-terminals alone */
 struct cc_grammar_element {
 	enum cc_token_type	type;
-	struct queue	rules;	/* Each entry in the q is a struct rule obj */
+	struct val_queue	rules;
 };
 
-/* Earley item */
 struct cc_grammar_item {
 	int	element;
 	int	rule;
@@ -161,7 +162,7 @@ struct cc_grammar_item {
  * TODO McLean/Horspool impl to combine lr(1) and Earley.
  */
 struct cc_grammar_item_set {
-	struct queue	items;	/* Each q-entry is cc_gram_item* */
+	struct ptr_queue	items;	/* Each q-entry is cc_gram_item* */
 };
 
 /*
@@ -172,14 +173,12 @@ struct cc_grammar_item_set {
 struct cc_parse_node {
 	enum cc_token_type	type;
 	struct cc_token		*token;
-	struct queue	child_nodes;	/* each q-entry is a cc_parse_node* */
+	struct ptr_queue	child_nodes;	/* each q-entry is a cc_parse_node* */
 };
 /*****************************************************************************/
 struct compiler {
-	struct queue	elements;	/* Each q-entry is cc_gram_elem obj */
-	struct queue	item_sets;	/* Each q-entry is cc_gram_item_set* */
-	struct queue	roots_stack;	/* of the parse forest */
-	struct queue	parse_stack;
+	struct val_queue	elements;
+	struct val_queue	item_sets;
 
 	int	cpp_tokens_fd;
 	const char	*cpp_tokens_path;

@@ -38,7 +38,6 @@ int main(int argc, char **argv)
 	}
 	scanner_delete(scanner);
 	scanner = NULL;
-
 	err = compiler_new(path, &compiler);	/* path owned by compiler */
 	if (err)
 		goto err1;

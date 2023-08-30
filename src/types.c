@@ -178,7 +178,7 @@ void *ptrq_remove_entry(struct ptr_queue *this,
 	assert(num_entries > 0);
 	write = this->read + index;
 	read = write + 1;
-	assert(read <= this->num_entries);
+	assert(read <= this->num_entries_allocated);
 	for (i = 0; i < num_entries; ++i, ++read, ++write) {
 		read %= this->num_entries_allocated;
 		write %= this->num_entries_allocated;
@@ -257,14 +257,30 @@ err_t valq_add_head(struct val_queue *this,
 void valq_remove_entry(struct val_queue *this,
 					   const int index)
 {
+	int num_entries, read, write, i;
 	assert(this->num_entries);
-	assert(index == 0 || index == this->num_entries - 1);
-	/* Removal in the middle not supported for valq */
-
-	if (index == 0) {
-		++this->read;
-		this->read %= this->num_entries_allocated;
+	if (index == 0 || index == this->num_entries - 1) {
+		if (index == 0) {
+			++this->read;
+			this->read %= this->num_entries_allocated;
+		}
+		goto done;
 	}
+
+	assert(index > 0 && index < this->num_entries - 1);
+	num_entries = this->num_entries - index - 1;
+	assert(num_entries > 0);
+	write = this->read + index;
+	read = write + 1;
+	assert(read <= this->num_entries_allocated);
+	for (i = 0; i < num_entries; ++i, ++read, ++write) {
+		read %= this->num_entries_allocated;
+		write %= this->num_entries_allocated;
+		memcpy(this->entries + write * this->entry_size,
+			   this->entries + read * this->entry_size,
+			   this->entry_size);
+	}
+done:
 	if (--this->num_entries)
 		return;
 	free(this->entries);

@@ -483,10 +483,11 @@ void cleanup()
  */
 void serialize()
 {
-	int i, j;
+	int i, j, k;
 	int fd;
-	const struct element *e;
+	const struct element *e[2];
 	const struct rule *r;
+	enum cc_token_type type;
 
 	fd = open("/tmp/grammar.bin", O_WRONLY | O_TRUNC | O_CREAT,
 			  S_IRUSR | S_IWUSR);
@@ -496,20 +497,42 @@ void serialize()
 	}
 	assert(fd >= 0);
 
-	write(fd, &num_elements, sizeof(num_elements));
-	for (i = 0; i < num_elements; ++i) {
-		e = &elements[i];
-		if (is_terminal(e->type))
-			continue;
-		write(fd, &e->type, sizeof(e->type));
-		assert(e->num_rules);
-		write(fd, &e->num_rules, sizeof(e->num_rules));
-		for (j = 0; j < e->num_rules; ++j) {
-			r = &e->rules[j];
+	for (i = j = 0; i < num_elements; ++i) {
+		e[0] = &elements[i];
+		if (!is_terminal(e[0]->type))
+			++j;
+	}
+	write(fd, &j, sizeof(j));	/* # of non-terminals */
+
+	/* Write in order of cc_token_type */
+	i = 0;
+	type = CC_TOKEN_TRANSLATION_OBJECT;
+	while (i < num_elements) {
+		for (j = 0; j < num_elements; ++j) {
+			e[0] = &elements[j];
+			if (is_terminal(e[0]->type))
+				continue;
+			if (e[0]->type != type)
+				continue;
+			break;
+		}
+		if (j == num_elements)
+			break;
+		write(fd, &e[0]->type, sizeof(e[0]->type));
+		assert(e[0]->num_rules);
+		write(fd, &e[0]->num_rules, sizeof(e[0]->num_rules));
+		for (j = 0; j < e[0]->num_rules; ++j) {
+			r = &e[0]->rules[j];
 			assert(r->num_rhs);
 			write(fd, &r->num_rhs, sizeof(r->num_rhs));
-			write(fd, r->rhs, r->num_rhs * sizeof(r->rhs[0]));
+			/* Convert element index into type while writing */
+			for (k = 0; k < r->num_rhs; ++k) {
+				e[1] = &elements[r->rhs[k]];
+				write(fd, &e[1]->type, sizeof(e[1]->type));
+			}
 		}
+		++type;
+		++i;
 	}
 	close(fd);
 }
