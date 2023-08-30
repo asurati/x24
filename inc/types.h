@@ -212,7 +212,8 @@ err_t	valq_add_head(struct val_queue *this,
 
 #define VALQ_FOR_EACH_WITH_REMOVE_REVERSE(q, e)	\
 	while (valq_is_empty(q) ? false :	\
-		   (valq_copy(&e, q, 0), valq_remove_tail(q), true))
+		   (valq_copy(&e, q, valq_num_entries(q) - 1),	\
+			valq_remove_tail(q), true))
 
 static inline
 void valq_init(struct val_queue *this,
