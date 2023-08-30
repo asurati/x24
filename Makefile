@@ -74,8 +74,10 @@ CFLAGS += -fno-asynchronous-unwind-tables -fsigned-char
 # ASAN:
 # CFLAGS += -fno-omit-frame-pointer -fno-optimize-sibling-calls
 # CFLAGS += -fsanitize=address
+# CFLAGS += -fsanitize=undefined
 # Build/Link:
 # LDFLAGS += -fsanitize=address -static-libsan
+# LDFLAGS += -fsanitize=undefined -static-libsan
 
 # These exports are needed by the BUILD command.
 export CC AR CFLAGS ARFLAGS BIN_AR
