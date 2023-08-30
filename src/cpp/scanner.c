@@ -13,8 +13,6 @@
 #include <linux/limits.h>
 
 static
-void macro_delete(void *p);
-static
 err_t scanner_scan_file(struct scanner *this,
 						const char *path);
 static
@@ -29,41 +27,29 @@ err_t scanner_expand_argument(struct scanner *this,
 							  struct cpp_tokens *out);
 static
 err_t scanner_process_one(struct scanner *this,
-						  struct ptr_queue *mstk,
+						  struct macro_stack *mstk,
 						  struct cpp_token_stream *stream,
-						  struct ptr_queue *out);
+						  struct cpp_tokens *out);
 static
 err_t scanner_arg_substitution(struct scanner *this,
 							   const struct macro *macro,
-							   const struct ptr_queue *args,
-							   const struct ptr_queue *exp_args,
+							   const struct cpp_tokens *args,
+							   const struct cpp_tokens *exp_args,
 							   const int num_args,
-							   struct ptr_queue *repl,
-							   struct ptr_queue *out);
+							   struct cpp_tokens *repl,
+							   struct cpp_tokens *out);
 static
 err_t scanner_arg_substitution_one(struct scanner *this,
 								   const struct macro *macro,
-								   const struct ptr_queue *args,
-								   const struct ptr_queue *exp_args,
+								   const struct cpp_tokens *args,
+								   const struct cpp_tokens *exp_args,
 								   const int num_args,
 								   const bool is_pasting,
-								   struct ptr_queue *repl,
-								   struct ptr_queue *out);
+								   struct cpp_tokens *repl,
+								   struct cpp_tokens *out);
 #if 0
 static
 int __attribute__((noinline)) break_point_func() {return 0;}
-#endif
-/*****************************************************************************/
-#if 0
-void char_string_print(const char *str,
-					   const int len)
-{
-	int i;
-
-	assert(str);
-	for (i = 0; i < len; ++i)
-		printf("%c", str[i]);
-}
 #endif
 /*****************************************************************************/
 err_t scanner_new(struct scanner **out)
@@ -76,9 +62,8 @@ err_t scanner_new(struct scanner **out)
 	if (this == NULL)
 		return ENOMEM;
 
-	ptrq_init(&this->macros, macro_delete);
-	valq_init(&this->cistk, sizeof(struct cond_incl_stack_entry),
-			  cond_incl_stack_entry_delete);
+	macros_init(&this->macros);
+	cond_incl_stack_init(&this->cistk);
 
 	this->cpp_tokens_path = NULL;
 	this->cpp_tokens_fd = -1;
@@ -110,8 +95,8 @@ err_t scanner_delete(struct scanner *this)
 	/*unlink(this->cpp_tokens_path);*/
 	free((void *)this->cpp_tokens_path);
 
-	assert(valq_num_entries(&this->cistk) == 0);
-	ptrq_empty(&this->macros);
+	assert(cond_incl_stack_num_entries(&this->cistk) == 0);
+	macros_empty(&this->macros);
 	free(this);
 	return ESUCCESS;
 }
@@ -130,7 +115,7 @@ int scanner_find_macro_index(const struct scanner *this,
 	const struct macro *macro;
 
 	name[0] = ident;
-	PTRQ_FOR_EACH(&this->macros, i, macro) {
+	MACROS_FOR_EACH(&this->macros, i, macro) {
 		assert(macro);
 		name[1] = cpp_token_resolved(macro->identifier);
 		if (!strcmp(name[0], name[1]))
@@ -146,14 +131,13 @@ const struct macro *scanner_find_macro(const struct scanner *this,
 	int i = scanner_find_macro_index(this, ident);
 	if (i < 0)
 		return NULL;
-	return ptrq_peek_entry(&this->macros, i);
+	return macros_peek_entry(&this->macros, i);
 }
 /*****************************************************************************/
-/* During deletion, take care to not free static mem */
 static
 void cpp_token_delete(void *p)
 {
-	struct cpp_token *this = *(struct cpp_token **)p;
+	struct cpp_token *this = p;
 	lexer_token_deref(this->base);
 	free(this);
 }
@@ -264,23 +248,22 @@ err_t cpp_token_new_place_marker(const bool has_white_space,
 /*****************************************************************************/
 /* out init by the caller */
 static
-err_t cpp_tokens_copy(const struct ptr_queue *this,
-					  struct ptr_queue *out)
+err_t cpp_tokens_copy(const struct cpp_tokens *this,
+					  struct cpp_tokens *out)
 {
 	int i;
 	err_t err;
 	struct cpp_token *t, *token;
 
-	assert(this->delete == cpp_token_delete);
-	PTRQ_FOR_EACH(this, i, t) {
+	CPP_TOKENS_FOR_EACH(this, i, t) {
 		assert(t);
 		err = cpp_token_copy(t, &token);
 		if (!err)
-			err = ptrq_add_tail(out, token);
+			err = cpp_tokens_add_tail(out, token);
 		if (err)
 			return err;
 	}
-	assert(i == ptrq_num_entries(this));
+	assert(i == cpp_tokens_num_entries(this));
 	return ESUCCESS;
 }
 
@@ -289,25 +272,25 @@ err_t cpp_tokens_copy(const struct ptr_queue *this,
  * A marker that is removed donates its npws to the token that follows.
  */
 static
-err_t cpp_tokens_remove_place_markers(struct ptr_queue *this)
+err_t cpp_tokens_remove_place_markers(struct cpp_tokens *this)
 {
 	err_t err;
 	struct cpp_token *token;
-	struct ptr_queue out;
+	struct cpp_tokens out;
 
-	ptrq_init(&out, cpp_token_delete);
-	PTRQ_FOR_EACH_WITH_REMOVE(this, token) {
+	cpp_tokens_init(&out);
+	CPP_TOKENS_FOR_EACH_WITH_REMOVE(this, token) {
 		assert(token);
 		if (cpp_token_type(token) == LXR_TOKEN_PLACE_MARKER) {
 			cpp_token_delete(token);
 			continue;
 		}
-		err = ptrq_add_tail(&out, token);
+		err = cpp_tokens_add_tail(&out, token);
 		if (err)
 			return err;
 	}
-	assert(ptrq_is_empty(this));
-	return ptrq_move(&out, this);
+	assert(cpp_tokens_is_empty(this));
+	return cpp_tokens_move(&out, this);
 }
 /*****************************************************************************/
 /* no ref change on base when token is placed/removed from queues, etc. */
@@ -321,7 +304,7 @@ err_t cpp_token_stream_peek_head(struct cpp_token_stream *this,
 	struct cpp_token *token;
 
 	if (!cpp_token_stream_is_empty(this)) {
-		*out = ptrq_peek_head(&this->tokens);
+		*out = cpp_tokens_peek_head(&this->tokens);
 		return ESUCCESS;
 	}
 
@@ -334,7 +317,7 @@ err_t cpp_token_stream_peek_head(struct cpp_token_stream *this,
 	if (!err)
 		err = cpp_token_new(base, &token);	/* move lexer's ref */
 	if (!err)
-		err = ptrq_add_tail(&this->tokens, token);
+		err = cpp_tokens_add_tail(&this->tokens, token);
 	if (!err)
 		*out = token;
 	return err;
@@ -350,7 +333,7 @@ err_t cpp_token_stream_remove_head(struct cpp_token_stream *this,
 	err = cpp_token_stream_peek_head(this, out);
 	if (err)
 		return err;
-	token = ptrq_remove_head(&this->tokens);
+	token = cpp_tokens_remove_head(&this->tokens);
 	assert(token == *out);
 	return err;
 }
@@ -360,8 +343,8 @@ void macro_delete(void *p)
 {
 	struct macro *this = p;
 	cpp_token_delete(this->identifier);
-	ptrq_empty(&this->parameters);
-	ptrq_empty(&this->replacement_list);
+	cpp_tokens_empty(&this->parameters);
+	cpp_tokens_empty(&this->replacement_list);
 	free(this);
 }
 
@@ -380,22 +363,22 @@ bool macro_are_identical(const struct macro *m[2])
 	if (m[0]->is_variadic != m[1]->is_variadic)
 		return false;
 
-	num_params[0] = ptrq_num_entries(&m[0]->parameters);
-	num_params[1] = ptrq_num_entries(&m[1]->parameters);
+	num_params[0] = cpp_tokens_num_entries(&m[0]->parameters);
+	num_params[1] = cpp_tokens_num_entries(&m[1]->parameters);
 	if (num_params[0] != num_params[1])
 		return false;
 
-	num_repl_tokens[0] = ptrq_num_entries(&m[0]->replacement_list);
-	num_repl_tokens[1] = ptrq_num_entries(&m[1]->replacement_list);
+	num_repl_tokens[0] = cpp_tokens_num_entries(&m[0]->replacement_list);
+	num_repl_tokens[1] = cpp_tokens_num_entries(&m[1]->replacement_list);
 	if (num_repl_tokens[0] != num_repl_tokens[1])
 		return false;
 
 	/* Check param-names */
 	for (i = 0; i < num_params[0]; ++i) {
-		token = ptrq_peek_entry(&m[0]->parameters, i);
+		token = cpp_tokens_peek_entry(&m[0]->parameters, i);
 		len[0] = cpp_token_resolved_length(token);
 		str[0] = cpp_token_resolved(token);
-		token = ptrq_peek_entry(&m[1]->parameters, i);
+		token = cpp_tokens_peek_entry(&m[1]->parameters, i);
 		len[1] = cpp_token_resolved_length(token);
 		str[1] = cpp_token_resolved(token);
 		if (len[0] != len[1] || strcmp(str[0], str[1]))
@@ -404,11 +387,11 @@ bool macro_are_identical(const struct macro *m[2])
 
 	/* Check repl-lists */
 	for (i = 0; i < num_repl_tokens[0]; ++i) {
-		token = ptrq_peek_entry(&m[0]->replacement_list, i);
+		token = cpp_tokens_peek_entry(&m[0]->replacement_list, i);
 		len[0] = cpp_token_resolved_length(token);
 		str[0] = cpp_token_resolved(token);
 		ws[0] = cpp_token_has_white_space(token);
-		token = ptrq_peek_entry(&m[1]->replacement_list, i);
+		token = cpp_tokens_peek_entry(&m[1]->replacement_list, i);
 		len[1] = cpp_token_resolved_length(token);
 		str[1] = cpp_token_resolved(token);
 		ws[1] = cpp_token_has_white_space(token);
@@ -420,7 +403,7 @@ bool macro_are_identical(const struct macro *m[2])
 
 static
 err_t macro_scan_parameters(struct macro *this,
-							struct ptr_queue *line)
+							struct cpp_tokens *line)
 {
 	err_t err;
 	int len[2], num_params, i, j;
@@ -430,21 +413,21 @@ err_t macro_scan_parameters(struct macro *this,
 	enum lexer_token_type type;
 
 	/* There should be at least a closing paren */
-	if (ptrq_is_empty(line))
+	if (cpp_tokens_is_empty(line))
 		return EINVAL;
 
 	/* No parameters */
-	token = ptrq_peek_head(line);
+	token = cpp_tokens_peek_head(line);
 	type = cpp_token_type(token);
 	if (type == LXR_TOKEN_RIGHT_PAREN) {
-		ptrq_delete_head(line);
+		cpp_tokens_delete_head(line);
 		return ESUCCESS;
 	}
 
 	was_prev_comma = true;	/* so that we start with ident */
 	closed = false;
-	while (!ptrq_is_empty(line)) {
-		token = ptrq_remove_head(line);
+	while (!cpp_tokens_is_empty(line)) {
+		token = cpp_tokens_remove_head(line);
 		type = cpp_token_type(token);
 
 		if (this->is_variadic && type != LXR_TOKEN_RIGHT_PAREN)
@@ -478,7 +461,7 @@ err_t macro_scan_parameters(struct macro *this,
 				this->is_variadic = true;
 
 			/* token's ref on base remains intact. */
-			err = ptrq_add_tail(&this->parameters, token);
+			err = cpp_tokens_add_tail(&this->parameters, token);
 			if (err)
 				return err;
 			continue;
@@ -496,7 +479,7 @@ err_t macro_scan_parameters(struct macro *this,
 		return EINVAL;
 
 	/* each parameter must be uniquely named among the parameters. */
-	num_params = ptrq_num_entries(&this->parameters);
+	num_params = cpp_tokens_num_entries(&this->parameters);
 	assert(num_params);
 
 	/* No need to check ellipsis. */
@@ -504,11 +487,11 @@ err_t macro_scan_parameters(struct macro *this,
 		--num_params;
 
 	for (i = 0; i < num_params - 1; ++i) {
-		token = ptrq_peek_entry(&this->parameters, i);
+		token = cpp_tokens_peek_entry(&this->parameters, i);
 		len[0] = cpp_token_resolved_length(token);
 		str[0] = cpp_token_resolved(token);
 		for (j = i + 1; j < num_params; ++j) {
-			token = ptrq_peek_entry(&this->parameters, j);
+			token = cpp_tokens_peek_entry(&this->parameters, j);
 			len[1] = cpp_token_resolved_length(token);
 			str[1] = cpp_token_resolved(token);
 			if (len[0] != len[1] || strcmp(str[0], str[1]))
@@ -521,7 +504,7 @@ err_t macro_scan_parameters(struct macro *this,
 
 static
 err_t macro_scan_replacement_list(struct macro *this,
-								  struct ptr_queue *line)
+								  struct cpp_tokens *line)
 {
 	err_t err;
 	bool is_first;
@@ -529,13 +512,13 @@ err_t macro_scan_replacement_list(struct macro *this,
 	enum lexer_token_type type;
 
 	/* Empty is allowed */
-	if (ptrq_is_empty(line))
+	if (cpp_tokens_is_empty(line))
 		return ESUCCESS;
 
 	is_first = true;
 	type = LXR_TOKEN_INVALID;
-	while (!ptrq_is_empty(line)) {
-		token = ptrq_remove_head(line);
+	while (!cpp_tokens_is_empty(line)) {
+		token = cpp_tokens_remove_head(line);
 		type = cpp_token_type(token);
 
 		/* token-pasting cannot be the first token in a repl-list. */
@@ -569,7 +552,7 @@ err_t macro_scan_replacement_list(struct macro *this,
 		 */
 		if (is_first)
 			token->has_white_space = false;
-		err = ptrq_add_tail(&this->replacement_list, token);
+		err = cpp_tokens_add_tail(&this->replacement_list, token);
 		if (err)
 			return err;
 		is_first = false;
@@ -589,7 +572,7 @@ int macro_find_parameter(const struct macro *this,
 	const struct cpp_token *token;
 
 	name[0] = ident;
-	PTRQ_FOR_EACH(&this->parameters, i, token) {
+	CPP_TOKENS_FOR_EACH(&this->parameters, i, token) {
 		name[1] = cpp_token_resolved(token);
 		if (!strcmp(name[0], name[1]))
 			return i;
@@ -682,7 +665,7 @@ err0:
 
 static
 err_t scanner_scan_directive_include(struct scanner *this,
-									 struct ptr_queue *line,
+									 struct cpp_tokens *line,
 									 const char *dir_path)
 {
 	err_t err;
@@ -691,53 +674,53 @@ err_t scanner_scan_directive_include(struct scanner *this,
 	const char *name;
 	char *str;
 	struct cpp_token *token;
-	struct ptr_queue tokens;
-	struct ptr_queue exp_line;
+	struct cpp_tokens tokens;
+	struct cpp_tokens exp_line;
 	enum lexer_token_type type;
 
-	if (ptrq_is_empty(line))	/* no file-name */
+	if (cpp_tokens_is_empty(line))	/* no file-name */
 		return EINVAL;
 
-	ptrq_init(&exp_line, cpp_token_delete);
-	ptrq_init(&tokens, cpp_token_delete);
+	cpp_tokens_init(&exp_line);
+	cpp_tokens_init(&tokens);
 
-	token = ptrq_peek_head(line);
+	token = cpp_tokens_peek_head(line);
 	type = cpp_token_type(token);
 	if (type == LXR_TOKEN_CHAR_STRING_LITERAL) {
 		name = cpp_token_source(token);
 		/* TODO: If the string has embedded nul chars? */
 		err = scanner_include_qseq(this, dir_path, name);
-		queue_delete_head(line);
+		cpp_tokens_delete_head(line);
 		return err;
 	}
 
 	if (type != LXR_TOKEN_LESS_THAN) {
 		/* repurpose expand_argument function */
 		err =  scanner_expand_argument(this, line, &exp_line);
-		queue_empty(line);
+		cpp_tokens_empty(line);
 		if (err)
 			return err;
 		/* If the exp_line doesn't begin with a " or a < token, err */
-		if (queue_is_empty(&exp_line))
+		if (cpp_tokens_is_empty(&exp_line))
 			return EINVAL;
-		token = queue_peek_head(&exp_line);
+		token = cpp_tokens_peek_head(&exp_line);
 		type = cpp_token_type(token);
 		if (type != LXR_TOKEN_CHAR_STRING_LITERAL &&
 			type != LXR_TOKEN_LESS_THAN)
 			return EINVAL;
 		err = scanner_scan_directive_include(this, &exp_line, dir_path);
-		queue_empty(&exp_line);
+		cpp_tokens_empty(&exp_line);
 		return err;
 	}
 
 	assert(type == LXR_TOKEN_LESS_THAN);
-	queue_delete_head(line);
+	cpp_tokens_delete_head(line);
 
 	/* Form the path from tokens. maintain ws */
 	closed = false;
 	name_len = 0;
-	while (!queue_is_empty(line)) {
-		token = queue_remove_head(line);
+	while (!cpp_tokens_is_empty(line)) {
+		token = cpp_tokens_remove_head(line);
 		if (cpp_token_type(token) == LXR_TOKEN_GREATER_THAN) {
 			closed = true;
 			cpp_token_delete(token);
@@ -745,7 +728,7 @@ err_t scanner_scan_directive_include(struct scanner *this,
 		}
 		name_len += cpp_token_has_white_space(token) ? 1 : 0;
 		name_len += cpp_token_source_length(token);
-		err = queue_add_tail(&tokens, token);
+		err = cpp_tokens_add_tail(&tokens, token);
 		if (err)
 			return err;
 	}
@@ -757,8 +740,8 @@ err_t scanner_scan_directive_include(struct scanner *this,
 		return ENOMEM;
 
 	str[0] = 0;
-	while (!queue_is_empty(&tokens)) {
-		token = queue_remove_head(&tokens);
+	while (!cpp_tokens_is_empty(&tokens)) {
+		token = cpp_tokens_remove_head(&tokens);
 		assert(cpp_token_type(token) != LXR_TOKEN_GREATER_THAN);
 		if (cpp_token_has_white_space(token))
 			strcat(str, " ");
@@ -811,17 +794,17 @@ err_t scanner_check_macro_redefine(const struct scanner *this,
 
 static
 err_t scanner_scan_directive_undef(struct scanner *this,
-								   struct queue *line)
+								   struct cpp_tokens *line)
 {
 	int i;
 	const char *name;
 	struct cpp_token *ident;
 
 	/* #undef without an ident is an error */
-	if (queue_is_empty(line))
+	if (cpp_tokens_is_empty(line))
 		return EINVAL;
 
-	ident = queue_remove_head(line);
+	ident = cpp_tokens_remove_head(line);
 	if (!cpp_token_is_identifier(ident))
 		return EINVAL;
 
@@ -830,23 +813,23 @@ err_t scanner_scan_directive_undef(struct scanner *this,
 	cpp_token_delete(ident);
 	if (i < 0)
 		return ESUCCESS;	/* Not defined */
-	array_delete_entry(&this->macros, i);
+	macros_delete_entry(&this->macros, i);
 	return ESUCCESS;
 }
 
 static
 err_t scanner_scan_directive_define(struct scanner *this,
-									struct queue *line)
+									struct cpp_tokens *line)
 {
 	err_t err;
 	struct macro *macro;
 	struct cpp_token *ident, *token;
 
 	/* #define without an ident is an error */
-	if (queue_is_empty(line))
+	if (cpp_tokens_is_empty(line))
 		return EINVAL;
 
-	ident = queue_remove_head(line);
+	ident = cpp_tokens_remove_head(line);
 	if (!cpp_token_is_identifier(ident))
 		return EINVAL;
 
@@ -858,17 +841,17 @@ err_t scanner_scan_directive_define(struct scanner *this,
 	macro->identifier = ident;
 	macro->is_function_like = false;
 	macro->is_variadic = false;
-	queue_init(&macro->parameters, cpp_token_delete);
-	queue_init(&macro->replacement_list, cpp_token_delete);
+	cpp_tokens_init(&macro->parameters);
+	cpp_tokens_init(&macro->replacement_list);
 
 	/* Check if this is a func-like or an obj-like macro */
-	if (!queue_is_empty(line)) {
-		token = queue_peek_head(line);
+	if (!cpp_tokens_is_empty(line)) {
+		token = cpp_tokens_peek_head(line);
 		if (cpp_token_type(token) == LXR_TOKEN_LEFT_PAREN &&
 			cpp_token_is_first(token) == false &&
 			cpp_token_has_white_space(token) == false) {
 			/* free the left-paren */
-			queue_delete_head(line);
+			cpp_tokens_delete_head(line);
 			macro->is_function_like = true;
 		}
 	}
@@ -890,7 +873,7 @@ err_t scanner_scan_directive_define(struct scanner *this,
 		return err;
 	}
 	assert(err == ENOENT);
-	return array_add_entry(&this->macros, macro);
+	return macros_add_tail(&this->macros, macro);
 }
 /*****************************************************************************/
 static
@@ -912,7 +895,7 @@ bool rpn_stack_entry_sign(const struct rpn_stack_entry *this)
  */
 
 static
-err_t rpn_stack_evaluate(struct queue *this,
+err_t rpn_stack_evaluate(struct rpn_stack *this,
 						 struct rpn_stack_entry *out)
 {
 	err_t err;
@@ -920,9 +903,9 @@ err_t rpn_stack_evaluate(struct queue *this,
 	int num_question_marks;
 	bool sign[2];	/* false == +ve, true == -ve */
 	uintmax_t value[2];
-	struct queue result, stk;
-	struct rpn_stack_entry *entry;
-	struct rpn_stack_entry *operand[2];
+	struct rpn_stack result, stk;
+	struct rpn_stack_entry entry;
+	struct rpn_stack_entry operand[2];
 	enum lexer_token_type operator;
 
 	/*
@@ -931,54 +914,55 @@ err_t rpn_stack_evaluate(struct queue *this,
 	 * But the processing of rpn starts at the bottom of this representation.
 	 * So, reverse the stack.
 	 */
-	stack_init(&stk);
-	queue_for_each_with_rem_rev(this, entry) {
-		err = stack_push(&stk, entry);
+	rpn_stack_init(&stk);
+	rpn_stack_init(&result);
+	RPN_STACK_FOR_EACH_WITH_REMOVE_REVERSE(this, entry) {
+		err = rpn_stack_push(&stk, &entry);
 		if (err)
 			return err;
 	}
-	assert(queue_is_empty(this));
+	assert(rpn_stack_is_empty(this));
+
+	/* Set this to rev(this) */
 	*this = stk;
-	stack_init(&stk);
+	rpn_stack_init(&stk);
 
 	/* Default is false/0 */
 	out->type = RPN_STACK_ENTRY_UNSIGNED;
 	out->u.value = 0;
 
-	stack_init(&result);
-	while (!stack_is_empty(this)) {
-		entry = stack_pop(this);
+	while (!rpn_stack_is_empty(this)) {
+		entry = rpn_stack_pop(this);
 
 		/* Push non-operatror values on the stack. */
-		if (entry->type == RPN_STACK_ENTRY_SIGNED ||
-			entry->type == RPN_STACK_ENTRY_UNSIGNED) {
-			err = stack_push(&result, entry);
+		if (entry.type == RPN_STACK_ENTRY_SIGNED ||
+			entry.type == RPN_STACK_ENTRY_UNSIGNED) {
+			err = rpn_stack_push(&result, &entry);
 			if (err)
 				return err;
 			continue;
 		}
 
-		operator = entry->u.operator;
-		free(entry);	/* operator entry no longer needed */
+		operator = entry.u.operator;
 
-		assert(!stack_is_empty(&result));
-		operand[1] = stack_pop(&result);
-		value[1] = operand[1]->u.value;
-		sign[1] = rpn_stack_entry_sign(operand[1]);
+		assert(!rpn_stack_is_empty(&result));
+		operand[1] = rpn_stack_pop(&result);
+		value[1] = operand[1].u.value;
+		sign[1] = rpn_stack_entry_sign(&operand[1]);
 
 		/* unary op? */
 		switch (operator) {
 		case LXR_TOKEN_UNARY_MINUS:
 			value[1] = -(intmax_t)value[1];
-			operand[1]->type = RPN_STACK_ENTRY_SIGNED;
+			operand[1].type = RPN_STACK_ENTRY_SIGNED;
 			break;
 		case LXR_TOKEN_LOGICAL_NOT:
 			value[1] = !value[1];
-			operand[1]->type = RPN_STACK_ENTRY_UNSIGNED;
+			operand[1].type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_BITWISE_NOT:
 			value[1] = ~value[1];
-			operand[1]->type = RPN_STACK_ENTRY_SIGNED;
+			operand[1].type = RPN_STACK_ENTRY_SIGNED;
 			break;
 		default:
 			break;
@@ -988,8 +972,8 @@ err_t rpn_stack_evaluate(struct queue *this,
 		case LXR_TOKEN_UNARY_MINUS:
 		case LXR_TOKEN_LOGICAL_NOT:
 		case LXR_TOKEN_BITWISE_NOT:
-			operand[1]->u.value = value[1];
-			err = stack_push(&result, operand[1]);
+			operand[1].u.value = value[1];
+			err = rpn_stack_push(&result, &operand[1]);
 			if (err)
 				return err;
 			continue;
@@ -997,10 +981,10 @@ err_t rpn_stack_evaluate(struct queue *this,
 			break;
 		}
 
-		assert(!stack_is_empty(&result));
-		operand[0] = stack_pop(&result);
-		value[0] = operand[0]->u.value;
-		sign[0] = rpn_stack_entry_sign(operand[0]);
+		assert(!rpn_stack_is_empty(&result));
+		operand[0] = rpn_stack_pop(&result);
+		value[0] = operand[0].u.value;
+		sign[0] = rpn_stack_entry_sign(&operand[0]);
 
 		if (operator == LXR_TOKEN_CONDITIONAL) {
 			num_question_marks = 1;
@@ -1012,56 +996,51 @@ err_t rpn_stack_evaluate(struct queue *this,
 			empty = false;
 			if (value[0]) {
 				/* intiial cond is true. result is op[1], and free the rest */
-				free(operand[0]);
 				operand[0] = operand[1];
 				empty = true;	/* empty the false part of the conditional */
 			} else {
 				/* initial cond is false. free op[1], and eval the rest */
-				free(operand[1]);
 			}
 
 			/* Create a sub-stack, until the corresponding : */
-			while (!stack_is_empty(this)) {
-				entry = stack_peek(this);
-				if (entry->u.operator == LXR_TOKEN_COLON &&
+			while (!rpn_stack_is_empty(this)) {
+				entry = rpn_stack_peek(this);
+				if (entry.u.operator == LXR_TOKEN_COLON &&
 					num_question_marks == 1)
 					break;
-				stack_pop(this);
-				if (entry->u.operator == LXR_TOKEN_CONDITIONAL)
+				rpn_stack_pop(this);
+				if (entry.u.operator == LXR_TOKEN_CONDITIONAL)
 					++num_question_marks;
-				else if (entry->u.operator == LXR_TOKEN_COLON)
+				else if (entry.u.operator == LXR_TOKEN_COLON)
 					--num_question_marks;
-				if (empty) {
-					free(entry);
+				if (empty)
 					continue;
-				}
-				err = stack_push(&stk, entry);
+				err = rpn_stack_push(&stk, &entry);
 				if (err)
 					return err;
 			}
-			if (stack_is_empty(this))
+			if (rpn_stack_is_empty(this))
 				return EINVAL;
-			free(stack_pop(this));	/* free the corresponding colon */
+			rpn_stack_pop(this);	/* pop the corresponding colon */
 
 			if (!empty)	/* evaluate the false part of the ?: conditional */
-				err = rpn_stack_evaluate(&stk, operand[0]);
+				err = rpn_stack_evaluate(&stk, &operand[0]);
 			if (!err)
-				err = stack_push(&result, operand[0]);
+				err = rpn_stack_push(&result, &operand[0]);
 			if (err)
 				return err;
-			assert(stack_is_empty(&stk));
+			assert(rpn_stack_is_empty(&stk));
 			continue;
 		}
 
-		free(operand[1]);	/* no longer needed */
 		switch (operator) {
 		case LXR_TOKEN_LOGICAL_OR:
 			value[0] = value[0] || value[1];
-			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+			operand[0].type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_LOGICAL_AND:
 			value[0] = value[0] && value[1];
-			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+			operand[0].type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_BITWISE_OR:
 			value[0] = value[0] | value[1];
@@ -1074,11 +1053,11 @@ err_t rpn_stack_evaluate(struct queue *this,
 			break;
 		case LXR_TOKEN_EQUALS:
 			value[0] = value[0] == value[1];
-			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+			operand[0].type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_NOT_EQUALS:
 			value[0] = value[0] != value[1];
-			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+			operand[0].type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_LESS_THAN:
 			/*
@@ -1094,7 +1073,7 @@ err_t rpn_stack_evaluate(struct queue *this,
 				value[0] = 1;
 			else
 				value[0] = 0;	/* +ve < -ve is false */
-			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+			operand[0].type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_LESS_THAN_EQUALS:
 			if (sign[0] == sign[1])
@@ -1103,7 +1082,7 @@ err_t rpn_stack_evaluate(struct queue *this,
 				value[0] = 1;
 			else
 				value[0] = 0;	/* +ve <= -ve is false */
-			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+			operand[0].type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_GREATER_THAN:
 			if (sign[0] == sign[1])
@@ -1112,7 +1091,7 @@ err_t rpn_stack_evaluate(struct queue *this,
 				value[0] = 0;
 			else
 				value[0] = 1;	/* +ve > -ve is true */
-			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+			operand[0].type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_GREATER_THAN_EQUALS:
 			if (sign[0] == sign[1])
@@ -1121,7 +1100,7 @@ err_t rpn_stack_evaluate(struct queue *this,
 				value[0] = 0;
 			else
 				value[0] = 1;	/* +ve >= -ve is true */
-			operand[0]->type = RPN_STACK_ENTRY_UNSIGNED;
+			operand[0].type = RPN_STACK_ENTRY_UNSIGNED;
 			break;
 		case LXR_TOKEN_SHIFT_LEFT:
 			if (value[1] > 63)
@@ -1163,29 +1142,27 @@ err_t rpn_stack_evaluate(struct queue *this,
 			assert(0);
 			return EINVAL;
 		}	/* switch */
-		operand[0]->u.value = value[0];
-		err = stack_push(&result, operand[0]);
+		operand[0].u.value = value[0];
+		err = rpn_stack_push(&result, &operand[0]);
 		if (err)
 			return err;
 	}	/* for */
 
-	assert(!stack_is_empty(&result));
-	entry = stack_pop(&result);
-	*out = *entry;
-	free(entry);
-	assert(stack_is_empty(&result));
+	assert(!rpn_stack_is_empty(&result));
+	*out = rpn_stack_pop(&result);
+	assert(rpn_stack_is_empty(&result));
 	return err;
 }
 
 /* this == operator stack */
 static
-err_t rpn_stack_push_operator(struct queue *this,
-							  struct queue *out,
+err_t rpn_stack_push_operator(struct rpn_stack *this,
+							  struct rpn_stack *out,
 							  const enum lexer_token_type operator)
 {
 	err_t err;
 	int priorities[2];
-	struct rpn_stack_entry *entry, *top_entry;
+	struct rpn_stack_entry entry, top_entry;
 
 	/*
 	 * If opstk is empty, or has left-paren on tos, push.
@@ -1193,47 +1170,44 @@ err_t rpn_stack_push_operator(struct queue *this,
 	 * else if the tos has the same priority operator, pop.
 	 * Note all our operators are left-assoc.
 	 */
-	entry = malloc(sizeof(*entry));
-	if (entry == NULL)
-		return ENOMEM;
-	entry->type = RPN_STACK_ENTRY_OPERATOR;
-	entry->u.operator = operator;
+	entry.type = RPN_STACK_ENTRY_OPERATOR;
+	entry.u.operator = operator;
 
 	/* If the stack is empty, it will push the new entry and return */
-	while (!stack_is_empty(this)) {
-		top_entry = stack_peek(this);
-		assert(top_entry->type == RPN_STACK_ENTRY_OPERATOR);
+	while (!rpn_stack_is_empty(this)) {
+		top_entry = rpn_stack_peek(this);
+		assert(top_entry.type == RPN_STACK_ENTRY_OPERATOR);
 
 		/* If we hit a left-paren, push on top of it */
-		if (top_entry->u.operator == LXR_TOKEN_LEFT_PAREN)
-			return stack_push(this, entry);
+		if (top_entry.u.operator == LXR_TOKEN_LEFT_PAREN)
+			return rpn_stack_push(this, &entry);
 
-		priorities[0] = rpn_operator_precedence(top_entry->u.operator);
+		priorities[0] = rpn_operator_precedence(top_entry.u.operator);
 		priorities[1] = rpn_operator_precedence(operator);
 
 		/* the new op has higher prio than onstk-entry */
 		if (priorities[0] > priorities[1])
-			return stack_push(this, entry);
+			return rpn_stack_push(this, &entry);
 
 		/*
 		 * only colon has the prio 12. if operator == colon, the
 		 * on-stk-operator is also colon. note that : is right-assoc.
 		 */
 		if (priorities[0] == priorities[1] && operator == LXR_TOKEN_COLON)
-			return stack_push(this, entry);
+			return rpn_stack_push(this, &entry);
 
 		/*
 		 * same prior non-colons, or new-op has lower prio than on-stk.
 		 * pop the top_entry and push it onto the output stack, and then
 		 * recheck.
 		 */
-		stack_pop(this);	/* same prio => left-asocc behaviour */
-		err = stack_push(out, top_entry);
+		rpn_stack_pop(this);	/* same prio => left-asocc behaviour */
+		err = rpn_stack_push(out, &top_entry);
 		if (err)
 			return err;
 		/* recheck */
 	}
-	return stack_push(this, entry);
+	return rpn_stack_push(this, &entry);
 }
 
 static
@@ -1282,29 +1256,28 @@ err_t cpp_token_scan_rpn_integer(const struct cpp_token *this,
  */
 /* this is the tokens, out is the stack. out init by the caller */
 static
-err_t cpp_tokens_to_rpn(struct queue *this,
-						struct queue *out)
+err_t cpp_tokens_to_rpn_stack(struct cpp_tokens *this,
+							  struct rpn_stack *out)
 {
 	err_t err;
 	int state, i, num_left_parens, num_question_marks;
 	enum lexer_token_type type, operator;
 	struct cpp_token *token;
-	struct queue op_stk;
-	struct rpn_stack_entry *entry;
+	struct rpn_stack op_stk;
+	struct rpn_stack_entry entry;
 
 #if 1
-	queue_for_each(this, i, token) {
+	CPP_TOKENS_FOR_EACH(this, i, token) {
 		if (cpp_token_has_white_space(token))
 			printf(" ");
 		printf("%s", cpp_token_source(token));
 	}
 	printf("\n");
 #endif
-
-	stack_init(&op_stk);
+	rpn_stack_init(&op_stk);
 	state = num_left_parens = num_question_marks = 0;
-	while (!queue_is_empty(this)) {
-		token = queue_remove_head(this);
+	while (!cpp_tokens_is_empty(this)) {
+		token = cpp_tokens_remove_head(this);
 		type = operator = cpp_token_type(token);
 
 		/* if expecting operand, then scan a unary-expression. */
@@ -1312,12 +1285,9 @@ err_t cpp_tokens_to_rpn(struct queue *this,
 			/* left-paren is allowed only in state 0 */
 			if (type == LXR_TOKEN_LEFT_PAREN) {
 				cpp_token_delete(token);
-				entry = malloc(sizeof(*entry));
-				if (entry == NULL)
-					return ENOMEM;
-				entry->type = RPN_STACK_ENTRY_OPERATOR;
-				entry->u.operator = operator;
-				err = stack_push(&op_stk, entry);
+				entry.type = RPN_STACK_ENTRY_OPERATOR;
+				entry.u.operator = operator;
+				err = rpn_stack_push(&op_stk, &entry);
 				if (err)
 					return err;
 				++num_left_parens;
@@ -1352,13 +1322,10 @@ err_t cpp_tokens_to_rpn(struct queue *this,
 			if (type != LXR_TOKEN_NUMBER)
 				return EINVAL;
 
-			entry = malloc(sizeof(*entry));
-			if (entry == NULL)
-				return ENOMEM;
-			err = cpp_token_scan_rpn_integer(token, entry);
+			err = cpp_token_scan_rpn_integer(token, &entry);
 			cpp_token_delete(token);
 			if (!err)
-				err = stack_push(out, entry);
+				err = rpn_stack_push(out, &entry);
 			if (err)
 				return err;
 			state = 1;	/* change state to expect a binary op */
@@ -1375,20 +1342,19 @@ err_t cpp_tokens_to_rpn(struct queue *this,
 			 * as long as we do not see a left-paren, pop entries off of the
 			 * op_stk and push them onto the out stack
 			 */
-			while (!stack_is_empty(&op_stk)) {
-				entry = stack_peek(&op_stk);
-				if (entry->type == RPN_STACK_ENTRY_OPERATOR &&
-					entry->u.operator == LXR_TOKEN_LEFT_PAREN)
+			while (!rpn_stack_is_empty(&op_stk)) {
+				entry = rpn_stack_peek(&op_stk);
+				if (entry.type == RPN_STACK_ENTRY_OPERATOR &&
+					entry.u.operator == LXR_TOKEN_LEFT_PAREN)
 					break;
-				stack_pop(&op_stk);
-				err = stack_push(out, entry);
+				rpn_stack_pop(&op_stk);
+				err = rpn_stack_push(out, &entry);
 				if (err)
 					return err;
 			}
-			if (stack_is_empty(&op_stk))
+			if (rpn_stack_is_empty(&op_stk))
 				return EINVAL;
-			stack_pop(&op_stk);	/* pop the left-paren */
-			free(entry);
+			rpn_stack_pop(&op_stk);	/* pop the left-paren */
 			/* after reading a right-paren, we stay in the same state. */
 			--num_left_parens;
 			continue;
@@ -1418,9 +1384,9 @@ err_t cpp_tokens_to_rpn(struct queue *this,
 		return err;
 
 	/* If there's entries in the op_stk, push them onto the out */
-	while (!stack_is_empty(&op_stk)) {
-		entry = stack_pop(&op_stk);
-		err = stack_push(out, entry);
+	while (!rpn_stack_is_empty(&op_stk)) {
+		entry = rpn_stack_pop(&op_stk);
+		err = rpn_stack_push(out, &entry);
 		if (err)
 			return err;
 	}
@@ -1429,23 +1395,23 @@ err_t cpp_tokens_to_rpn(struct queue *this,
 
 /* this is the tokens */
 static
-err_t cpp_tokens_evaluate_expression(struct queue *this,
+err_t cpp_tokens_evaluate_expression(struct cpp_tokens *this,
 									 int *out)
 {
 	err_t err;
-	struct queue stk;
+	struct rpn_stack stk;
 	struct rpn_stack_entry result;
 
-	stack_init(&stk);
-	err = cpp_tokens_to_rpn(this, &stk);
+	rpn_stack_init(&stk);
+	err = cpp_tokens_to_rpn_stack(this, &stk);
 	if (err)
 		return err;
-	assert(queue_is_empty(this));
-	assert(!stack_is_empty(&stk));
+	assert(cpp_tokens_is_empty(this));
+	assert(!rpn_stack_is_empty(&stk));
 	err = rpn_stack_evaluate(&stk, &result);
 	if (err)
 		return err;
-	assert(stack_is_empty(&stk));
+	assert(rpn_stack_is_empty(&stk));
 	assert(result.type != RPN_STACK_ENTRY_OPERATOR);
 	*out = result.u.value ? 1 : 0;
 	return err;
@@ -1453,19 +1419,20 @@ err_t cpp_tokens_evaluate_expression(struct queue *this,
 
 /* Is any entry in wait/done state? */
 static
-bool cond_incl_stack_in_skip_zone(const struct queue *this)
+bool cond_incl_stack_in_skip_zone(const struct cond_incl_stack *this)
 {
 	int i;
-	const struct cond_incl_stack_entry *entry;
+	struct cond_incl_stack_entry entry, *e;
 
 	/* The cond-incl stack is empty; do not skip. */
-	if (stack_is_empty(this))
+	if (cond_incl_stack_is_empty(this))
 		return false;
 
-	for (i = 0; i < queue_num_entries(this); ++i) {
-		entry = stack_peek(this);
-		if (entry->state == COND_INCL_STATE_WAIT ||
-			entry->state == COND_INCL_STATE_DONE)
+	for (i = 0; i < cond_incl_stack_num_entries(this); ++i) {
+		e = valq_peek_entry(&this->q, i);
+		entry = *e;
+		if (entry.state == COND_INCL_STATE_WAIT ||
+			entry.state == COND_INCL_STATE_DONE)
 			return true;
 	}
 	return false;
@@ -1474,7 +1441,7 @@ bool cond_incl_stack_in_skip_zone(const struct queue *this)
 /* line has tokens after #if */
 static
 err_t scanner_scan_directive_if(struct scanner *this,
-								struct queue *line)
+								struct cpp_tokens *line)
 {
 	err_t err;
 	int num;
@@ -1483,35 +1450,32 @@ err_t scanner_scan_directive_if(struct scanner *this,
 	bool has_left_paren;
 	const char *name, *str;
 	struct cpp_token *token, *ident;
-	struct queue tokens, exp_line;
-	struct cond_incl_stack_entry *entry;
-	struct queue *cistk;
+	struct cpp_tokens tokens, exp_line;
+	struct cond_incl_stack_entry entry;
+	struct cond_incl_stack *cistk;
 	char32_t cp;
 
 	/* There should be tokens */
-	if (queue_is_empty(line))
+	if (cpp_tokens_is_empty(line))
 		return EINVAL;
 
-	queue_init(&tokens, cpp_token_delete);
-	queue_init(&exp_line, cpp_token_delete);
+	cpp_tokens_init(&tokens);
+	cpp_tokens_init(&exp_line);
 
 	cistk = &this->cistk;
-	entry = malloc(sizeof(*entry));
-	if (entry == NULL)
-		return ENOMEM;
-	entry->type = LXR_TOKEN_DIRECTIVE_IF;
+	entry.type = LXR_TOKEN_DIRECTIVE_IF;
 
 	/* If we are already inside a skip zone, just place done */
 	if (cond_incl_stack_in_skip_zone(cistk)) {
-		entry->state = COND_INCL_STATE_DONE;
-		return stack_push(cistk, entry);
+		entry.state = COND_INCL_STATE_DONE;
+		return cond_incl_stack_push(cistk, &entry);
 	}
 
 	/* Scan defined ident, defined(ident) first. */
-	while (!queue_is_empty(line)) {
-		token = queue_remove_head(line);
+	while (!cpp_tokens_is_empty(line)) {
+		token = cpp_tokens_remove_head(line);
 		if (cpp_token_type(token) != LXR_TOKEN_DEFINED) {
-			err = queue_add_tail(&tokens, token);
+			err = cpp_tokens_add_tail(&tokens, token);
 			if (err)
 				return err;
 			continue;
@@ -1521,25 +1485,25 @@ err_t scanner_scan_directive_if(struct scanner *this,
 		has_white_space = cpp_token_has_white_space(token);
 		is_first = cpp_token_is_first(token);
 		cpp_token_delete(token);
-		if (queue_is_empty(line))
+		if (cpp_tokens_is_empty(line))
 			return EINVAL;
 
 		has_left_paren = false;
-		token = queue_remove_head(line);
+		token = cpp_tokens_remove_head(line);
 		if (cpp_token_type(token) == LXR_TOKEN_LEFT_PAREN) {
-			if (queue_is_empty(line))
+			if (cpp_tokens_is_empty(line))
 				return EINVAL;
 			cpp_token_delete(token);
 			has_left_paren = true;
-			token = queue_remove_head(line);
+			token = cpp_tokens_remove_head(line);
 		}
 		if (!cpp_token_is_identifier(token))
 			return EINVAL;
 		ident = token;
 		if (has_left_paren) {
-			if (queue_is_empty(line))
+			if (cpp_tokens_is_empty(line))
 				return EINVAL;
-			token = queue_remove_head(line);
+			token = cpp_tokens_remove_head(line);
 			if (cpp_token_type(token) != LXR_TOKEN_RIGHT_PAREN)
 				return EINVAL;
 			cpp_token_delete(token);
@@ -1549,23 +1513,23 @@ err_t scanner_scan_directive_if(struct scanner *this,
 		cpp_token_delete(ident);
 		err = cpp_token_new_number(num, has_white_space, is_first, &token);
 		if (!err)
-			err = queue_add_tail(&tokens, token);
+			err = cpp_tokens_add_tail(&tokens, token);
 		if (err)
 			return err;
 	}
-	assert(queue_is_empty(line));
-	assert(!queue_is_empty(&tokens));
+	assert(cpp_tokens_is_empty(line));
+	assert(!cpp_tokens_is_empty(&tokens));
 
 	/* Now expand. repurpose expand_argument function */
 	err = scanner_expand_argument(this, &tokens, &exp_line);
-	queue_empty(&tokens);
+	cpp_tokens_empty(&tokens);
 	if (err)
 		return err;
 
 	/* true is replaced with 1, all other identifiers are replaced with 0 */
-	assert(!queue_is_empty(&exp_line));
-	while (!queue_is_empty(&exp_line)) {
-		token = queue_remove_head(&exp_line);
+	assert(!cpp_tokens_is_empty(&exp_line));
+	while (!cpp_tokens_is_empty(&exp_line)) {
+		token = cpp_tokens_remove_head(&exp_line);
 		type = cpp_token_type(token);
 
 		/* Can't have strings. */
@@ -1586,7 +1550,7 @@ err_t scanner_scan_directive_if(struct scanner *this,
 		 */
 		if (!cpp_token_is_identifier(token) &&
 			!cpp_token_is_char_const(token)) {
-			err = queue_add_tail(&tokens, token);
+			err = cpp_tokens_add_tail(&tokens, token);
 			if (err)
 				return err;
 			continue;
@@ -1620,55 +1584,54 @@ err_t scanner_scan_directive_if(struct scanner *this,
 		assert(num >= 0);
 		err = cpp_token_new_number(num, has_white_space, is_first, &token);
 		if (!err)
-			err = queue_add_tail(&tokens, token);
+			err = cpp_tokens_add_tail(&tokens, token);
 		if (err)
 			return err;
 	}
-	assert(queue_is_empty(&exp_line));
-	assert(!queue_is_empty(&tokens));
+	assert(cpp_tokens_is_empty(&exp_line));
+	assert(!cpp_tokens_is_empty(&tokens));
 
 	err = cpp_tokens_evaluate_expression(&tokens, &num);
 	if (err)
 		return err;
-	assert(queue_is_empty(&tokens));
+	assert(cpp_tokens_is_empty(&tokens));
 
 	/* Default is to wait */
-	entry->state = COND_INCL_STATE_WAIT;
+	entry.state = COND_INCL_STATE_WAIT;
 	if (num)
-		entry->state = COND_INCL_STATE_SCAN;
-	return stack_push(cistk, entry);
+		entry.state = COND_INCL_STATE_SCAN;
+	return cond_incl_stack_push(cistk, &entry);
 }
 
 /* line has tokens after #elif */
 static
 err_t scanner_scan_directive_elif(struct scanner *this,
-								  struct queue *line)
+								  struct cpp_tokens *line)
 {
-	struct queue *cistk;
-	struct cond_incl_stack_entry *entry;
+	struct cond_incl_stack *cistk;
+	struct cond_incl_stack_entry entry;
 
 	/* empty #elif is invalid */
-	if (queue_is_empty(line))
+	if (cpp_tokens_is_empty(line))
 		return EINVAL;
 
 	cistk = &this->cistk;
-	assert(!stack_is_empty(cistk));
+	assert(!cond_incl_stack_is_empty(cistk));
 
 	/* We must pop as the later in_skip_zone calc works with a stale value. */
 	/* If the tos has else, invalid */
-	entry = stack_pop(cistk);
-	if (entry->type == LXR_TOKEN_DIRECTIVE_ELSE)
+	entry = cond_incl_stack_pop(cistk);
+	if (entry.type == LXR_TOKEN_DIRECTIVE_ELSE)
 		return EINVAL;
-	assert(entry->type == LXR_TOKEN_DIRECTIVE_IF);
+	assert(entry.type == LXR_TOKEN_DIRECTIVE_IF);
 
 	/* If the if was in scan/done state, or we are in skip-zone, done */
-	if (entry->state == COND_INCL_STATE_SCAN ||
-		entry->state == COND_INCL_STATE_DONE ||
+	if (entry.state == COND_INCL_STATE_SCAN ||
+		entry.state == COND_INCL_STATE_DONE ||
 		cond_incl_stack_in_skip_zone(cistk)) {
-		entry->state = COND_INCL_STATE_DONE;
-		return stack_push(cistk, entry);
+		entry.state = COND_INCL_STATE_DONE;
+		return cond_incl_stack_push(cistk, &entry);
 	}
-	free(entry);
 	/* We aren't in a skip-zone. Place appropriate state. */
 	return scanner_scan_directive_if(this, line);
 }
@@ -1676,154 +1639,149 @@ err_t scanner_scan_directive_elif(struct scanner *this,
 static inline
 err_t scanner_scan_directive_end_if(struct scanner *this)
 {
-	struct queue *cistk;
-	struct cond_incl_stack_entry *entry;
+	struct cond_incl_stack *cistk;
 
 	cistk = &this->cistk;
-	assert(!stack_is_empty(cistk));
-	entry = stack_pop(cistk);
-	free(entry);
+	assert(!cond_incl_stack_is_empty(cistk));
+	cond_incl_stack_pop(cistk);
 	return ESUCCESS;
 }
 
 static
 err_t scanner_scan_directive_else(struct scanner *this)
 {
-	struct queue *cistk;
-	struct cond_incl_stack_entry *entry;
+	struct cond_incl_stack *cistk;
+	struct cond_incl_stack_entry entry;
 
 	cistk = &this->cistk;
-	assert(!stack_is_empty(cistk));
+	assert(!cond_incl_stack_is_empty(cistk));
 
 	/* We must pop as the later in_skip_zone calc works with a stale value. */
 	/* If the tos already has else, invalid */
-	entry = stack_pop(cistk);
-	if (entry->type == LXR_TOKEN_DIRECTIVE_ELSE)
+	entry = cond_incl_stack_pop(cistk);
+	if (entry.type == LXR_TOKEN_DIRECTIVE_ELSE)
 		return EINVAL;
-	assert(entry->type == LXR_TOKEN_DIRECTIVE_IF);
+	assert(entry.type == LXR_TOKEN_DIRECTIVE_IF);
 
-	entry->type = LXR_TOKEN_DIRECTIVE_ELSE;
+	entry.type = LXR_TOKEN_DIRECTIVE_ELSE;
 
 	/* If the if was in scan/done state, or we are in skip-zone, done */
-	if (entry->state == COND_INCL_STATE_SCAN ||
-		entry->state == COND_INCL_STATE_DONE ||
+	if (entry.state == COND_INCL_STATE_SCAN ||
+		entry.state == COND_INCL_STATE_DONE ||
 		cond_incl_stack_in_skip_zone(cistk)) {
-		entry->state = COND_INCL_STATE_DONE;
-		return stack_push(cistk, entry);
+		entry.state = COND_INCL_STATE_DONE;
+		return cond_incl_stack_push(cistk, &entry);
 	}
 
 	/* We aren't in a skip-zone, and if was in wait. place scan. */
-	assert(entry->state == COND_INCL_STATE_WAIT);
-	entry->state = COND_INCL_STATE_SCAN;
-	return stack_push(cistk, entry);
+	assert(entry.state == COND_INCL_STATE_WAIT);
+	entry.state = COND_INCL_STATE_SCAN;
+	return cond_incl_stack_push(cistk, &entry);
 }
 
 /* the first token in the line is the identifier */
 static
 err_t scanner_scan_directive_elifdef(struct scanner *this,
 									 const bool is_ndef,
-									 struct queue *line)
+									 struct cpp_tokens *line)
 {
-	struct queue *cistk;
-	struct cond_incl_stack_entry *entry;
+	struct cond_incl_stack *cistk;
+	struct cond_incl_stack_entry entry;
 	const char *name;
 	struct cpp_token *token;
 	const struct macro *macro;
 
 	/* #ifndef without identifier is invalid. */
-	if (queue_is_empty(line))
+	if (cpp_tokens_is_empty(line))
 		return EINVAL;
-	token = queue_remove_head(line);
+	token = cpp_tokens_remove_head(line);
 	if (!cpp_token_is_identifier(token))
 		return EINVAL;
 
 	cistk = &this->cistk;
-	assert(!stack_is_empty(cistk));
+	assert(!cond_incl_stack_is_empty(cistk));
 
 	/* We must pop as the later in_skip_zone calc works with a stale value. */
 	/* If the tos has else, invalid */
-	entry = stack_pop(cistk);
-	if (entry->type == LXR_TOKEN_DIRECTIVE_ELSE)
+	entry = cond_incl_stack_pop(cistk);
+	if (entry.type == LXR_TOKEN_DIRECTIVE_ELSE)
 		return EINVAL;
-	assert(entry->type == LXR_TOKEN_DIRECTIVE_IF);
+	assert(entry.type == LXR_TOKEN_DIRECTIVE_IF);
 
 	/* If the if was in scan/done state, or we are in skip-zone, done */
-	if (entry->state == COND_INCL_STATE_SCAN ||
-		entry->state == COND_INCL_STATE_DONE ||
+	if (entry.state == COND_INCL_STATE_SCAN ||
+		entry.state == COND_INCL_STATE_DONE ||
 		cond_incl_stack_in_skip_zone(cistk)) {
-		entry->state = COND_INCL_STATE_DONE;
-		return stack_push(cistk, entry);
+		entry.state = COND_INCL_STATE_DONE;
+		return cond_incl_stack_push(cistk, &entry);
 	}
 
 	/* We aren't in a skip-zone. Place appropriate state. */
 	/* Default is to wait */
-	entry->state = COND_INCL_STATE_WAIT;
+	entry.state = COND_INCL_STATE_WAIT;
 	name = cpp_token_resolved(token);
 	macro = scanner_find_macro(this, name);
 	if ((is_ndef && macro == NULL) || (!is_ndef && macro))
-		entry->state = COND_INCL_STATE_SCAN;	/* true. */
-	return stack_push(cistk, entry);
+		entry.state = COND_INCL_STATE_SCAN;	/* true. */
+	return cond_incl_stack_push(cistk, &entry);
 }
 
 /* the first token in the line is the identifier */
 static
 err_t scanner_scan_directive_ifdef(struct scanner *this,
 								   const bool is_ndef,
-								   struct queue *line)
+								   struct cpp_tokens *line)
 {
-	struct cond_incl_stack_entry *entry;
-	struct queue *cistk;
+	struct cond_incl_stack_entry entry;
+	struct cond_incl_stack *cistk;
 	const char *name;
 	struct cpp_token *token;
 	const struct macro *macro;
 
 	/* #if[n]def without identifier is invalid. */
-	if (queue_is_empty(line))
+	if (cpp_tokens_is_empty(line))
 		return EINVAL;
-	token = queue_remove_head(line);
+	token = cpp_tokens_remove_head(line);
 	if (!cpp_token_is_identifier(token))
 		return EINVAL;
 
 	/* Allocate new entry, and push */
 	cistk = &this->cistk;
-	entry = malloc(sizeof(*entry));
-	if (entry == NULL)
-		return ENOMEM;
-	entry->type = LXR_TOKEN_DIRECTIVE_IF;
+	entry.type = LXR_TOKEN_DIRECTIVE_IF;
 
 	/* If we are already inside a skip zone, just place done */
 	if (cond_incl_stack_in_skip_zone(cistk)) {
 		cpp_token_delete(token);
-		entry->state = COND_INCL_STATE_DONE;
-		return stack_push(cistk, entry);
+		entry.state = COND_INCL_STATE_DONE;
+		return cond_incl_stack_push(cistk, &entry);
 	}
 	/* We aren't in a skip-zone. Place appropriate state. */
 
 	/* Default is to wait */
-	entry->state = COND_INCL_STATE_WAIT;
+	entry.state = COND_INCL_STATE_WAIT;
 	name = cpp_token_resolved(token);
 	macro = scanner_find_macro(this, name);
 	cpp_token_delete(token);
 	if ((is_ndef && macro == NULL) || (!is_ndef && macro))
-		entry->state = COND_INCL_STATE_SCAN;	/* true. */
-	return stack_push(cistk, entry);
+		entry.state = COND_INCL_STATE_SCAN;	/* true. */
+	return cond_incl_stack_push(cistk, &entry);
 }
 /*****************************************************************************/
 /* line starts after # */
 static
 err_t scanner_scan_directive(struct scanner *this,
-							 struct queue *line,
+							 struct cpp_tokens *line,
 							 const char *lexer_dir_path)	/* for includes */
 {
 	enum lexer_token_type type;
-	struct queue *cistk;
+	struct cond_incl_stack *cistk;
 	struct cpp_token *token;
 
-	if (queue_is_empty(line))	/* # new-line. no effect. */
+	if (cpp_tokens_is_empty(line))	/* # new-line. no effect. */
 		return ESUCCESS;
 
 	cistk = &this->cistk;
-	token = queue_remove_head(line);
+	token = cpp_tokens_remove_head(line);
 	type = cpp_token_type(token);
 	cpp_token_delete(token);
 
@@ -1841,7 +1799,7 @@ err_t scanner_scan_directive(struct scanner *this,
 	case LXR_TOKEN_DIRECTIVE_ELSE:
 	case LXR_TOKEN_DIRECTIVE_END_IF:
 		/* The cistk shouldn't be empty */
-		if (stack_is_empty(cistk))
+		if (cond_incl_stack_is_empty(cistk))
 			return EINVAL;
 		break;
 	default:
@@ -1886,8 +1844,8 @@ err_t scanner_scan_directive(struct scanner *this,
 /*****************************************************************************/
 /* this == copy of repl. out init by caller */
 static
-err_t cpp_tokens_paste_object_like(struct queue *this,
-								   struct queue *out)
+err_t cpp_tokens_paste_object_like(struct cpp_tokens *this,
+								   struct cpp_tokens *out)
 {
 	err_t err;
 	bool is_non_str_double_hash;
@@ -1901,13 +1859,13 @@ err_t cpp_tokens_paste_object_like(struct queue *this,
 	prev = NULL;
 
 	/* this should not be empty */
-	assert(!queue_is_empty(this));
+	assert(!cpp_tokens_is_empty(this));
 
-	while (!queue_is_empty(this)) {
-		curr = queue_remove_head(this);
+	while (!cpp_tokens_is_empty(this)) {
+		curr = cpp_tokens_remove_head(this);
 		if (cpp_token_type(curr) != LXR_TOKEN_DOUBLE_HASH) {
 			if (prev) {
-				err = queue_add_tail(out, prev);
+				err = cpp_tokens_add_tail(out, prev);
 				if (err)
 					return err;
 			}
@@ -1916,10 +1874,10 @@ err_t cpp_tokens_paste_object_like(struct queue *this,
 		}
 
 		/* curr is ## */
-		if (prev == NULL || queue_is_empty(this))
+		if (prev == NULL || cpp_tokens_is_empty(this))
 			return EINVAL;
 
-		next = queue_remove_head(this);
+		next = cpp_tokens_remove_head(this);
 
 		is_non_str_double_hash = false;
 		if (cpp_token_type(prev) == LXR_TOKEN_HASH &&
@@ -1964,36 +1922,36 @@ err_t cpp_tokens_paste_object_like(struct queue *this,
 			assert(cpp_token_type(curr) == LXR_TOKEN_DOUBLE_HASH);
 			curr->base->type = LXR_TOKEN_NON_STRINGIZING_DOUBLE_HASH;
 		}
-		err = queue_add_tail(out, curr);
+		err = cpp_tokens_add_tail(out, curr);
 		if (err)
 			return err;
 	}
 	assert(err == ESUCCESS);
-	assert(queue_is_empty(this));
+	assert(cpp_tokens_is_empty(this));
 	if (prev)
-		return queue_add_tail(out, prev);
+		return cpp_tokens_add_tail(out, prev);
 	return err;
 }
 
 /* out init by caller */
 static
-err_t cpp_tokens_expand_object_like(const struct queue *repl,
-									struct queue *out)
+err_t cpp_tokens_expand_object_like(const struct cpp_tokens *repl,
+									struct cpp_tokens *out)
 {
 	err_t err = ESUCCESS;
-	struct queue res;
+	struct cpp_tokens res;
 
 	/* empty repl-list is allowed */
-	if (queue_is_empty(repl))
+	if (cpp_tokens_is_empty(repl))
 		return err;
 
 	/* Work with a copy of the repl */
-	queue_init(&res, cpp_token_delete);
+	cpp_tokens_init(&res);
 	err = cpp_tokens_copy(repl, &res);
 	if (err)
 		return err;
 	err = cpp_tokens_paste_object_like(&res, out);
-	assert(queue_is_empty(&res));
+	assert(cpp_tokens_is_empty(&res));
 	return err;
 }
 /*****************************************************************************/
@@ -2002,7 +1960,7 @@ err_t cpp_tokens_expand_object_like(const struct queue *repl,
  * that is at the beginning of the stringizing arg list.
  */
 static
-err_t cpp_tokens_stringize(const struct queue *this,
+err_t cpp_tokens_stringize(const struct cpp_tokens *this,
 						   const bool has_white_space,
 						   const bool is_first,
 						   struct cpp_token **out)
@@ -2017,7 +1975,7 @@ err_t cpp_tokens_stringize(const struct queue *this,
 	const struct cpp_token *t;
 
 	/* Empty string */
-	if (this == NULL || queue_is_empty(this)) {
+	if (this == NULL || cpp_tokens_is_empty(this)) {
 		str = malloc(4);
 		if (str == NULL)
 			return ENOMEM;
@@ -2027,10 +1985,10 @@ err_t cpp_tokens_stringize(const struct queue *this,
 		len = 3;
 		goto build;
 	}
-	assert(!queue_is_empty(this));
+	assert(!cpp_tokens_is_empty(this));
 
 	len = 3;	/* for the dbl quotes + nl*/
-	queue_for_each(this, i, t) {
+	CPP_TOKENS_FOR_EACH(this, i, t) {
 		/* We may have to remove placemarkers */
 		assert(cpp_token_type(t) != LXR_TOKEN_PLACE_MARKER);
 		if (i)
@@ -2052,7 +2010,7 @@ err_t cpp_tokens_stringize(const struct queue *this,
 
 	k = 0;
 	str[k++] = '\"';
-	queue_for_each(this, i, t) {
+	CPP_TOKENS_FOR_EACH(this, i, t) {
 		if (i && cpp_token_has_white_space(t))
 			str[k++] = ' ';
 		/* replace \ with \\, and " with \" */
@@ -2092,8 +2050,8 @@ build:
  */
 /* Starts at the openeing left-paren. out init by caller. */
 static
-err_t cpp_tokens_collect_va_opt_args(struct queue *repl,
-									 struct queue *out)
+err_t cpp_tokens_collect_va_opt_args(struct cpp_tokens *repl,
+									 struct cpp_tokens *out)
 {
 	err_t err;
 	enum lexer_token_type type;
@@ -2101,27 +2059,27 @@ err_t cpp_tokens_collect_va_opt_args(struct queue *repl,
 	struct cpp_token *token;
 
 	/* Should begin with a left-paren */
-	if (queue_is_empty(repl))
+	if (cpp_tokens_is_empty(repl))
 		return EINVAL;
-	token = queue_remove_head(repl);
+	token = cpp_tokens_remove_head(repl);
 	if (cpp_token_type(token) != LXR_TOKEN_LEFT_PAREN)
 		return EINVAL;
 	cpp_token_delete(token);
 
 	/* Should at least have a right-paren */
-	if (queue_is_empty(repl))
+	if (cpp_tokens_is_empty(repl))
 		return EINVAL;
 
 	/* Is the expression empty? */
-	token = queue_peek_head(repl);
+	token = cpp_tokens_peek_head(repl);
 	if (cpp_token_type(token) == LXR_TOKEN_RIGHT_PAREN) {
-		queue_delete_head(repl);
+		cpp_tokens_delete_head(repl);
 		return ESUCCESS;
 	}
 
 	num_internal_left_parens = 0;
-	while (!queue_is_empty(repl)) {
-		token = queue_remove_head(repl);
+	while (!cpp_tokens_is_empty(repl)) {
+		token = cpp_tokens_remove_head(repl);
 		type = cpp_token_type(token);
 
 		/* Can't have va-opt inside va-opt */
@@ -2133,7 +2091,7 @@ err_t cpp_tokens_collect_va_opt_args(struct queue *repl,
 			cpp_token_delete(token);
 			return ESUCCESS;
 		}
-		err = queue_add_tail(out, token);
+		err = cpp_tokens_add_tail(out, token);
 		if (err)
 			return err;
 		if (type == LXR_TOKEN_LEFT_PAREN)
@@ -2144,7 +2102,6 @@ err_t cpp_tokens_collect_va_opt_args(struct queue *repl,
 	/* repl is empty, and the closing right-paren was not found. */
 	return EINVAL;
 }
-
 
 /* Consumes left, right */
 static
@@ -2232,12 +2189,12 @@ err0:
 static
 err_t scanner_arg_substitution_others(struct scanner *this,
 									  const struct macro *macro,
-									  const struct queue *args,
-									  const struct queue *exp_args,
+									  const struct cpp_tokens *args,
+									  const struct cpp_tokens *exp_args,
 									  const int num_args,
 									  const bool is_pasting,
-									  struct queue *repl,
-									  struct queue *out)
+									  struct cpp_tokens *repl,
+									  struct cpp_tokens *out)
 {
 	err_t err;
 	bool has_white_space, is_first;
@@ -2247,11 +2204,11 @@ err_t scanner_arg_substitution_others(struct scanner *this,
 	struct cpp_token *token;
 	(void)this;
 
-	assert(!queue_is_empty(repl));
+	assert(!cpp_tokens_is_empty(repl));
 
-	num_params = queue_num_entries(&macro->parameters);
+	num_params = cpp_tokens_num_entries(&macro->parameters);
 
-	token = queue_remove_head(repl);
+	token = cpp_tokens_remove_head(repl);
 	type = cpp_token_type(token);
 
 	/*
@@ -2259,13 +2216,13 @@ err_t scanner_arg_substitution_others(struct scanner *this,
 	 * parameter. Simply add it.
 	 */
 	if (!cpp_token_is_identifier(token))
-		return queue_add_tail(out, token);
+		return cpp_tokens_add_tail(out, token);
 
 	/* identifier, but not any of the va-arg, va-opts and param. */
 	name = cpp_token_resolved(token);
 	index = macro_find_parameter(macro, name);
 	if (type != LXR_TOKEN_VA_ARGS && index == EOF)
-		return queue_add_tail(out, token);
+		return cpp_tokens_add_tail(out, token);
 
 	/*
 	 * If the arg is absent or is empty, and is_pasting, place-marker.
@@ -2277,7 +2234,7 @@ err_t scanner_arg_substitution_others(struct scanner *this,
 	if (type == LXR_TOKEN_VA_ARGS) {
 		assert(macro->is_variadic);
 		if (num_args == num_params - 1 ||
-			queue_is_empty(&args[num_args - 1])) {
+			cpp_tokens_is_empty(&args[num_args - 1])) {
 			if (!is_pasting) {
 				cpp_token_delete(token);
 				return ESUCCESS;
@@ -2288,7 +2245,7 @@ err_t scanner_arg_substitution_others(struct scanner *this,
 			err = cpp_token_new_place_marker(has_white_space, is_first,
 											 &token);
 			if (!err)
-				err = queue_add_tail(out, token);
+				err = cpp_tokens_add_tail(out, token);
 			return err;
 		}
 		/*
@@ -2302,14 +2259,14 @@ err_t scanner_arg_substitution_others(struct scanner *this,
 	}
 	assert(index >= 0);
 	if (is_pasting) {
-		if (queue_is_empty(&args[index])) {
+		if (cpp_tokens_is_empty(&args[index])) {
 			has_white_space = cpp_token_has_white_space(token);
 			is_first = cpp_token_is_first(token);
 			cpp_token_delete(token);
 			err = cpp_token_new_place_marker(has_white_space, is_first,
 											 &token);
 			if (!err)
-				err = queue_add_tail(out, token);
+				err = cpp_tokens_add_tail(out, token);
 			return err;
 		}
 		cpp_token_delete(token);
@@ -2327,14 +2284,14 @@ err_t scanner_arg_substitution_others(struct scanner *this,
 static
 err_t scanner_arg_substitution_paste(struct scanner *this,
 									 const struct macro *macro,
-									 const struct queue *args,
-									 const struct queue *exp_args,
+									 const struct cpp_tokens *args,
+									 const struct cpp_tokens *exp_args,
 									 const int num_args,
-									 struct queue *repl,
-									 struct queue *out)
+									 struct cpp_tokens *repl,
+									 struct cpp_tokens *out)
 {
 	err_t err;
-	struct queue res;
+	struct cpp_tokens res;
 	struct cpp_token *prev, *next, *token;
 
 	/*
@@ -2342,27 +2299,27 @@ err_t scanner_arg_substitution_paste(struct scanner *this,
 	 * non-hash token, and the second is ##. Perform arg-subs for the first
 	 * token.
 	 */
-	queue_init(&res, cpp_token_delete);
+	cpp_tokens_init(&res);
 	err = scanner_arg_substitution_one(this, macro, args, exp_args,
 									   num_args, true, repl, out);
 	if (err)
 		return err;
 
 	/* Take the last token of out */
-	assert(!queue_is_empty(out));
-	prev = queue_remove_tail(out);
-	while (!queue_is_empty(repl)) {
-		token = queue_peek_head(repl);
+	assert(!cpp_tokens_is_empty(out));
+	prev = cpp_tokens_remove_tail(out);
+	while (!cpp_tokens_is_empty(repl)) {
+		token = cpp_tokens_peek_head(repl);
 		if (cpp_token_type(token) != LXR_TOKEN_DOUBLE_HASH)
 			break;
-		queue_delete_head(repl);
+		cpp_tokens_delete_head(repl);
 
 		/* Can't have ## end */
-		if (queue_is_empty(repl))
+		if (cpp_tokens_is_empty(repl))
 			return EINVAL;
 
 		/* Can't have ## ## */
-		token = queue_peek_head(repl);
+		token = cpp_tokens_peek_head(repl);
 		if (cpp_token_type(token) == LXR_TOKEN_DOUBLE_HASH)
 			return EINVAL;
 
@@ -2370,23 +2327,23 @@ err_t scanner_arg_substitution_paste(struct scanner *this,
 										   num_args, true, repl, &res);
 		if (err)
 			return err;
-		assert(!queue_is_empty(&res));
+		assert(!cpp_tokens_is_empty(&res));
 
 		/* Take the first token in res */
-		next = queue_remove_head(&res);
+		next = cpp_tokens_remove_head(&res);
 		err = cpp_token_paste(prev, next, &token);
 		if (!err)
-			err = queue_add_tail(out, token);
+			err = cpp_tokens_add_tail(out, token);
 		if (err)
 			return err;
-		queue_move(&res, out);
+		cpp_tokens_move(&res, out);
 		/* Take the last token of out */
-		assert(!queue_is_empty(out));
-		prev = queue_remove_tail(out);
+		assert(!cpp_tokens_is_empty(out));
+		prev = cpp_tokens_remove_tail(out);
 	}
 	assert(err == ESUCCESS);
 	if (prev)
-		err = queue_add_tail(out, prev);
+		err = cpp_tokens_add_tail(out, prev);
 	return err;
 }
 
@@ -2394,30 +2351,30 @@ err_t scanner_arg_substitution_paste(struct scanner *this,
 static
 err_t scanner_arg_substitution_one(struct scanner *this,
 								   const struct macro *macro,
-								   const struct queue *args,
-								   const struct queue *exp_args,
+								   const struct cpp_tokens *args,
+								   const struct cpp_tokens *exp_args,
 								   const int num_args,
 								   const bool is_pasting,
-								   struct queue *repl,
-								   struct queue *out)
+								   struct cpp_tokens *repl,
+								   struct cpp_tokens *out)
 {
 	err_t err;
 	bool has_white_space, is_first;
 	int index, num_params;
 	bool is_stringizing;
 	enum lexer_token_type type;
-	struct queue va_args, va_exp_args;
+	struct cpp_tokens va_args, va_exp_args;
 	struct cpp_token *token, *next;
 	const char *name;
 
-	queue_init(&va_args, cpp_token_delete);
-	queue_init(&va_exp_args, cpp_token_delete);
-	num_params = queue_num_entries(&macro->parameters);
+	cpp_tokens_init(&va_args);
+	cpp_tokens_init(&va_exp_args);
+	num_params = cpp_tokens_num_entries(&macro->parameters);
 
 	/* repl must not be empty */
-	assert(!queue_is_empty(repl));
+	assert(!cpp_tokens_is_empty(repl));
 
-	token = queue_remove_head(repl);
+	token = cpp_tokens_remove_head(repl);
 	type = cpp_token_type(token);
 
 	/* These are consumed internally. */
@@ -2432,10 +2389,10 @@ err_t scanner_arg_substitution_one(struct scanner *this,
 		cpp_token_delete(token);
 
 		/* We should have a parameter next. */
-		if (queue_is_empty(repl))
+		if (cpp_tokens_is_empty(repl))
 			return EINVAL;
 
-		token = queue_remove_head(repl);
+		token = cpp_tokens_remove_head(repl);
 		type = cpp_token_type(token);
 		if (!cpp_token_is_identifier(token))
 			return EINVAL;
@@ -2502,9 +2459,9 @@ va_opt:
 		 * being emtpy, and by va_args begin empty.
 		 */
 		if (num_args == num_params - 1 ||
-			queue_is_empty(&va_args) ||
-			queue_is_empty(&exp_args[num_args - 1])) {
-			queue_empty(&va_args);
+			cpp_tokens_is_empty(&va_args) ||
+			cpp_tokens_is_empty(&exp_args[num_args - 1])) {
+			cpp_tokens_empty(&va_args);
 			if (is_stringizing) {
 				err = cpp_tokens_stringize(NULL, has_white_space, is_first,
 										   &token);
@@ -2522,14 +2479,14 @@ va_opt:
 									   &va_args, &va_exp_args);
 		if (err)
 			return err;
-		assert(queue_is_empty(&va_args));
+		assert(cpp_tokens_is_empty(&va_args));
 
 		/*
 		 * TODO:
 		 * Follow the e.g. of scanner_process_one that donates the npws from
 		 * the ident to the first token of the exp-list.
 		 */
-		assert(!queue_is_empty(&va_exp_args));
+		assert(!cpp_tokens_is_empty(&va_exp_args));
 #if 0
 		if (!queue_is_empty(&va_exp_args)) {
 			token = cpp_tokens_peek_head(&va_exp_args);
@@ -2548,7 +2505,7 @@ va_opt:
 			cpp_tokens_remove_place_markers(&va_exp_args);
 			err = cpp_tokens_stringize(&va_exp_args, has_white_space, is_first,
 									   &token);
-			assert(queue_is_empty(&va_exp_args));
+			assert(cpp_tokens_is_empty(&va_exp_args));
 			goto hash_done;
 		}
 
@@ -2556,18 +2513,18 @@ va_opt:
 		 * To check for paste, we must set token to the last of the
 		 * va_exp_args.
 		 */
-		assert(!queue_is_empty(&va_exp_args));
-		queue_move(&va_exp_args, out);
-		token = queue_remove_tail(out);
+		assert(!cpp_tokens_is_empty(&va_exp_args));
+		cpp_tokens_move(&va_exp_args, out);
+		token = cpp_tokens_remove_tail(out);
 		/* fall thru */
 	}
 check_paste:
 	/* Whatever token is, check for token ##, before adding the otken. */
-	if (is_pasting == false && !queue_is_empty(repl)) {
-		next = queue_peek_head(repl);
+	if (is_pasting == false && !cpp_tokens_is_empty(repl)) {
+		next = cpp_tokens_peek_head(repl);
 		type = cpp_token_type(next);
 		if (type == LXR_TOKEN_DOUBLE_HASH) {
-			err = queue_add_head(repl, token);
+			err = cpp_tokens_add_head(repl, token);
 			if (!err)
 				err = scanner_arg_substitution_paste(this, macro, args,
 													 exp_args, num_args, repl,
@@ -2576,7 +2533,7 @@ check_paste:
 		}
 		/* else, token is not followed by ## */
 	}
-	err = queue_add_head(repl, token);
+	err = cpp_tokens_add_head(repl, token);
 	if (!err)
 		err = scanner_arg_substitution_others(this, macro, args, exp_args,
 											  num_args, is_pasting, repl, out);
@@ -2586,15 +2543,15 @@ check_paste:
 static
 err_t scanner_arg_substitution(struct scanner *this,
 							   const struct macro *macro,
-							   const struct queue *args,
-							   const struct queue *exp_args,
+							   const struct cpp_tokens *args,
+							   const struct cpp_tokens *exp_args,
 							   const int num_args,
-							   struct queue *repl,
-							   struct queue *out)
+							   struct cpp_tokens *repl,
+							   struct cpp_tokens *out)
 {
 	err_t err;
 
-	while (!queue_is_empty(repl)) {
+	while (!cpp_tokens_is_empty(repl)) {
 		err = scanner_arg_substitution_one(this, macro, args, exp_args,
 										   num_args, false, repl, out);
 		if (err)
@@ -2606,40 +2563,40 @@ err_t scanner_arg_substitution(struct scanner *this,
 static
 err_t scanner_expand_function_like(struct scanner *this,
 								   const struct macro *macro,
-								   const struct queue *args,
-								   const struct queue *exp_args,
+								   const struct cpp_tokens *args,
+								   const struct cpp_tokens *exp_args,
 								   const int num_args,
-								   struct queue *out)
+								   struct cpp_tokens *out)
 
 {
 	err_t err;
-	struct queue repl;
+	struct cpp_tokens repl;
 
-	if (queue_is_empty(&macro->replacement_list))
+	if (cpp_tokens_is_empty(&macro->replacement_list))
 		return ESUCCESS;
 
-	queue_init(&repl, cpp_token_delete);
+	cpp_tokens_init(&repl);
 	err = cpp_tokens_copy(&macro->replacement_list, &repl);
 	if (err)
 		return err;
 	/* Consumes the copy of the repl-list */
 	err = scanner_arg_substitution(this, macro, args, exp_args, num_args,
 								   &repl, out);
-	assert(queue_is_empty(&repl));
+	assert(cpp_tokens_is_empty(&repl));
 	return err;
 }
 
 /* Caller inits out */
 static
 err_t scanner_expand_argument(struct scanner *this,
-							  const struct queue *arg,
-							  struct queue *out)
+							  const struct cpp_tokens *arg,
+							  struct cpp_tokens *out)
 {
 	err_t err;
 	struct cpp_token *token;
-	struct queue exp_arg;
+	struct cpp_tokens exp_arg;
 	struct cpp_token_stream stream;
-	struct queue mstk;
+	struct macro_stack mstk;
 	struct cpp_token repl_list_end;
 	struct lexer_token _repl_list_end;
 
@@ -2648,10 +2605,10 @@ err_t scanner_expand_argument(struct scanner *this,
 	repl_list_end.base = &_repl_list_end;;
 	repl_list_end.base->type = LXR_TOKEN_REPL_LIST_END;
 
-	queue_init(&exp_arg, cpp_token_delete);
+	cpp_tokens_init(&exp_arg);
 
 	/* Argument expansion is done on a fresh stack */
-	stack_init(&mstk);
+	macro_stack_init(&mstk);
 
 	cpp_token_stream_init(&stream, NULL);
 	err = cpp_tokens_copy(arg, &stream.tokens);
@@ -2673,16 +2630,16 @@ err_t scanner_expand_argument(struct scanner *this,
 
 		err = scanner_process_one(this, &mstk, &stream, &exp_arg);
 		if (!err)
-			err = queue_move(&exp_arg, out);
+			err = cpp_tokens_move(&exp_arg, out);
 		if (!err)
 			continue;
 
 		/* Handle EPARTIAL here */
 		if (err == EPARTIAL) {
 			/* Our barrier was signalled. Return success to the caller. */
-			assert(queue_is_empty(&exp_arg));
+			assert(cpp_tokens_is_empty(&exp_arg));
 			assert(!cpp_token_stream_is_empty(&stream));
-			err = queue_move(&stream.tokens, out);
+			err = cpp_tokens_move(&stream.tokens, out);
 			if (err)
 				return err;
 			break;
@@ -2700,24 +2657,24 @@ err_t scanner_expand_argument(struct scanner *this,
 static
 err_t cpp_token_stream_collect_arguments(struct cpp_token_stream *stream,
 										 const struct macro *macro,
-										 struct queue **out_args,
+										 struct cpp_tokens **out_args,
 										 int *out_num_args)
 {
 	err_t err;
 	int num_args, num_internal_left_parens, num_params;
 	enum lexer_token_type type;
 	struct cpp_token *token, *ident, *left_paren;
-	struct queue tokens;
-	struct queue *args, *arg;
+	struct cpp_tokens tokens;
+	struct cpp_tokens *args, *arg;
 
 	err = cpp_token_stream_remove_head(stream, &ident);
 	assert(err == ESUCCESS);
 	err = cpp_token_stream_remove_head(stream, &left_paren);
 	assert(err == ESUCCESS);
 
-	num_params = queue_num_entries(&macro->parameters);
+	num_params = cpp_tokens_num_entries(&macro->parameters);
 	num_args = 1;	/* empty () is also an arg */
-	queue_init(&tokens, cpp_token_delete);
+	cpp_tokens_init(&tokens);
 
 	/* First, check if we have a full-invocation or a partial-invocation */
 	num_internal_left_parens = 0;
@@ -2751,7 +2708,7 @@ err_t cpp_token_stream_collect_arguments(struct cpp_token_stream *stream,
 			cpp_token_delete(token);
 			break;
 		}
-		err = queue_add_tail(&tokens, token);
+		err = cpp_tokens_add_tail(&tokens, token);
 		if (err)
 			return err;
 
@@ -2783,14 +2740,14 @@ err_t cpp_token_stream_collect_arguments(struct cpp_token_stream *stream,
 		 */
 
 		/* Reconstruct the stream */
-		assert(!queue_is_empty(&tokens));
-		queue_for_each_with_rem_rev(&tokens, token) {
+		assert(!cpp_tokens_is_empty(&tokens));
+		CPP_TOKENS_FOR_EACH_WITH_REMOVE_REVERSE(&tokens, token) {
 			err = cpp_token_stream_add_head(stream, token);
 			if (err)
 				return err;
 		}
 		if (!err)
-			assert(queue_is_empty(&tokens));
+			assert(cpp_tokens_is_empty(&tokens));
 		if (!err)
 			err = cpp_token_stream_add_head(stream, left_paren);
 		if (!err)
@@ -2809,7 +2766,7 @@ err_t cpp_token_stream_collect_arguments(struct cpp_token_stream *stream,
 	 * num_args matches with num_params. For all other macros, an arg that is
 	 * absent is sent as empty.
 	 */
-	if (num_params == 0 && queue_num_entries(&tokens) == 0)
+	if (num_params == 0 && cpp_tokens_num_entries(&tokens) == 0)
 		num_args = 0;
 
 	/* if the macro is not variadic, then num_args must equal num_params */
@@ -2841,11 +2798,11 @@ err_t cpp_token_stream_collect_arguments(struct cpp_token_stream *stream,
 	 * the invocation has no explicit args, num_args is set to 0.
 	 */
 	arg = &args[0];
-	queue_init(arg, cpp_token_delete);
+	cpp_tokens_init(arg);
 	num_args = 1;
 	num_internal_left_parens = 0;
-	while (!queue_is_empty(&tokens)) {
-		token = queue_remove_head(&tokens);
+	while (!cpp_tokens_is_empty(&tokens)) {
+		token = cpp_tokens_remove_head(&tokens);
 		type = cpp_token_type(token);
 
 		/*
@@ -2864,7 +2821,7 @@ err_t cpp_token_stream_collect_arguments(struct cpp_token_stream *stream,
 		 */
 		if (type == LXR_TOKEN_COMMA && num_internal_left_parens == 0) {
 			if (macro->is_variadic && num_args == num_params) {
-				err = queue_add_tail(arg, token);
+				err = cpp_tokens_add_tail(arg, token);
 				if (err)
 					return err;
 				continue;
@@ -2872,18 +2829,18 @@ err_t cpp_token_stream_collect_arguments(struct cpp_token_stream *stream,
 			cpp_token_delete(token);
 			++arg;
 			++num_args;
-			queue_init(arg, cpp_token_delete);
+			cpp_tokens_init(arg);
 			continue;
 		}
 		if (type == LXR_TOKEN_LEFT_PAREN)
 			++num_internal_left_parens;
 		else if (type == LXR_TOKEN_RIGHT_PAREN)
 			--num_internal_left_parens;
-		err = queue_add_tail(arg, token);
+		err = cpp_tokens_add_tail(arg, token);
 		if (err)
 			return err;
 	}
-	assert(queue_is_empty(&tokens));
+	assert(cpp_tokens_is_empty(&tokens));
 	*out_num_args = num_args;
 	*out_args = args;
 	return ESUCCESS;
@@ -2895,27 +2852,27 @@ err_t cpp_token_stream_collect_arguments(struct cpp_token_stream *stream,
  */
 static
 err_t scanner_process_one(struct scanner *this,
-						  struct queue *mstk,
+						  struct macro_stack *mstk,
 						  struct cpp_token_stream *stream,
-						  struct queue *out)
+						  struct cpp_tokens *out)
 {
 	err_t err;
 	int i, num_args;
 	const char *name;
 	struct cpp_token *token, *ident;
-	struct queue *args, *exp_args;
-	const struct queue *repl;
+	struct cpp_tokens *args, *exp_args;
+	const struct cpp_tokens *repl;
 	const struct macro *macro, *m;
 	struct cpp_token repl_list_end;
 	struct lexer_token _repl_list_end;
 	bool is_ident, is_marked, is_macro, is_active, has_white_space;
-	struct queue exp_repl, result;
+	struct cpp_tokens exp_repl, result;
 
 	args = exp_args = NULL;
 	num_args = 0;
 
-	queue_init(&exp_repl, cpp_token_delete);
-	queue_init(&result, cpp_token_delete);
+	cpp_tokens_init(&exp_repl);
+	cpp_tokens_init(&result);
 
 	/* repl-list-end-marker */
 	lexer_token_init(&_repl_list_end);
@@ -2934,18 +2891,18 @@ err_t scanner_process_one(struct scanner *this,
 	is_ident = cpp_token_is_identifier(ident);
 	is_marked = cpp_token_is_marked(ident);
 	if (!is_ident || is_marked)
-		return queue_add_tail(out, ident);
+		return cpp_tokens_add_tail(out, ident);
 
 	/* non-macro idents require no macro processing */
 	/* If the ident matches with an active macro, mark it and return */
 	name = cpp_token_resolved(ident);
 	macro = scanner_find_macro(this, name);
 	is_macro = macro != NULL;
-	is_active = is_macro && stack_find(mstk, macro);
+	is_active = is_macro && macro_stack_find(mstk, macro);
 	if (is_active)
 		ident->is_marked = true;
 	if (!is_macro || is_active)
-		return queue_add_tail(out, ident);
+		return cpp_tokens_add_tail(out, ident);
 
 	repl = &macro->replacement_list;
 
@@ -2984,7 +2941,7 @@ err_t scanner_process_one(struct scanner *this,
 	}
 
 	if (err || cpp_token_type(token) != LXR_TOKEN_LEFT_PAREN)
-		return queue_add_tail(out, ident);
+		return cpp_tokens_add_tail(out, ident);
 
 	/*
 	 * place ident back at the head position.
@@ -3014,10 +2971,10 @@ err_t scanner_process_one(struct scanner *this,
 			return ENOMEM;
 
 		for (i = 0; i < num_args; ++i) {
-			queue_init(&exp_args[i], cpp_token_delete);
+			cpp_tokens_init(&exp_args[i]);
 
 			/* empty arg */
-			if (queue_num_entries(&args[i]) == 0)
+			if (cpp_tokens_num_entries(&args[i]) == 0)
 				continue;
 
 			err = scanner_expand_argument(this, &args[i], &exp_args[i]);
@@ -3043,16 +3000,16 @@ rescan:
 	 *
 	 * This fixes the "char p[] = x ## y" example of the c2x standard.
 	 */
-	if (!queue_is_empty(&exp_repl)) {
-		token = queue_peek_head(&exp_repl);
+	if (!cpp_tokens_is_empty(&exp_repl)) {
+		token = cpp_tokens_peek_head(&exp_repl);
 		token->has_white_space = has_white_space;
 		cpp_tokens_remove_place_markers(&exp_repl);
 	}
 
-	if (queue_is_empty(&exp_repl))
+	if (cpp_tokens_is_empty(&exp_repl))
 		goto done;
 
-	err = stack_push(mstk, (void *)macro);
+	err = macro_stack_push(mstk, (void *)macro);
 	if (err)
 		return err;
 
@@ -3061,7 +3018,7 @@ rescan:
 	if (err)
 		return err;
 
-	queue_for_each_with_rem_rev(&exp_repl, token) {
+	CPP_TOKENS_FOR_EACH_WITH_REMOVE_REVERSE(&exp_repl, token) {
 		err = cpp_token_stream_add_head(stream, token);
 		if (err)
 			return err;
@@ -3080,7 +3037,7 @@ rescan:
 		}
 		err = scanner_process_one(this, mstk, stream, &result);
 		if (err == EPARTIAL) {
-			assert(queue_is_empty(&result));
+			assert(cpp_tokens_is_empty(&result));
 			assert(!cpp_token_stream_is_empty(stream));
 			/*
 			 * Our barrier was signalled. It was removed. Return success to our
@@ -3090,16 +3047,16 @@ rescan:
 			break;
 		}
 		if (!err)
-			err = queue_move(&result, out);
+			err = cpp_tokens_move(&result, out);
 		if (err)
 			break;
 	}
-	m = stack_pop(mstk);
+	m = macro_stack_pop(mstk);
 	assert(m == macro);
 done:
 	for (i = 0; i < num_args; ++i) {
-		queue_empty(&args[i]);
-		queue_empty(&exp_args[i]);
+		cpp_tokens_empty(&args[i]);
+		cpp_tokens_empty(&exp_args[i]);
 	}
 	if (num_args) {
 		free(args);
@@ -3290,7 +3247,7 @@ err_t scanner_serialize_cpp_token(struct scanner *this,
 /* out is initialized by the caller */
 static
 err_t cpp_token_stream_scan_line(struct cpp_token_stream *this,
-								 struct queue *out)
+								 struct cpp_tokens *out)
 {
 	err_t err;
 	struct cpp_token *token;
@@ -3309,7 +3266,7 @@ err_t cpp_token_stream_scan_line(struct cpp_token_stream *this,
 			lexer_set_position(this->lexer, save);
 			break;
 		}
-		err = queue_add_tail(out, token);
+		err = cpp_tokens_add_tail(out, token);
 		if (err)
 			return err;
 	}
@@ -3320,12 +3277,9 @@ err_t cpp_token_stream_scan_line(struct cpp_token_stream *this,
 		return err;
 #if 1
 	{
-		int num_tokens, i;
-
+		int i;
 		printf("%s: '#", __func__);
-		num_tokens = queue_num_entries(out);
-		for (i = 0; i < num_tokens; ++i) {
-			token = queue_peek_entry(out, i);
+		CPP_TOKENS_FOR_EACH(out, i, token) {
 			if (cpp_token_has_white_space(token))
 				printf(" ");
 			printf("%s", cpp_token_source(token));
@@ -3342,8 +3296,8 @@ err_t scanner_scan_file(struct scanner *this,
 {
 	int i;
 	err_t err;
-	struct queue output, line;
-	struct queue mstk;
+	struct cpp_tokens output, line;
+	struct macro_stack mstk;
 	struct cpp_token_stream stream;
 	struct lexer *lexer;
 	struct cpp_token *token;
@@ -3363,10 +3317,10 @@ err_t scanner_scan_file(struct scanner *this,
 		goto err1;
 	}
 
-	stack_init(&mstk);
+	macro_stack_init(&mstk);
 	cpp_token_stream_init(&stream, lexer);
-	queue_init(&line, cpp_token_delete);
-	queue_init(&output, cpp_token_delete);
+	cpp_tokens_init(&line);
+	cpp_tokens_init(&output);
 	while (true) {
 		err = cpp_token_stream_remove_head(&stream, &token);
 		if (err) {
@@ -3385,7 +3339,7 @@ err_t scanner_scan_file(struct scanner *this,
 				err = cpp_token_stream_scan_line(&stream, &line);
 			if (!err)
 				err = scanner_scan_directive(this, &line, lexer->dir_path);
-			queue_empty(&line);
+			cpp_tokens_empty(&line);
 			if (err)
 				break;
 			continue;
@@ -3420,20 +3374,20 @@ err_t scanner_scan_file(struct scanner *this,
 		 * then processed, they remain separate as they are now.
 		 */
 		printf("%s:", __func__);
-		queue_for_each(&output, i, token) {
+		CPP_TOKENS_FOR_EACH(&output, i, token) {
 			if (cpp_token_has_white_space(token))
 				printf(" ");
 			printf("%s", cpp_token_source(token));
 		}
 		printf("\n");
-		queue_for_each_with_rem(&output, token) {
+		CPP_TOKENS_FOR_EACH_WITH_REMOVE(&output, token) {
 			err = scanner_serialize_cpp_token(this, token);
 			if (err)
 				break;
 			cpp_token_delete(token);
 		}
-		/*queue_empty(&output);*/
-		assert(queue_is_empty(&output));
+		/*cpp_tokens_empty(&output);*/
+		assert(cpp_tokens_is_empty(&output));
 	}
 #if 0
 	if (!err && prev) {

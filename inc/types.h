@@ -42,18 +42,18 @@ err_t	ptrq_add_head(struct ptr_queue *this,
 
 #define PTRQ_FOR_EACH(q, ix, e)	\
 	for (ix = 0;	\
-		 e = ix < ptrq_num_entries(q) ? ptrq_peek_entry(q, ix) : NULL;	\
+		 (e = ix < ptrq_num_entries(q) ? ptrq_peek_entry(q, ix) : NULL);	\
 		 ++ix)
 
 #define PTRQ_FOR_EACH_WITH_REMOVE(q, e)	\
-	while (e = ptrq_is_empty(q) ? NULL : ptrq_remove_head(q))
+	while ((e = ptrq_is_empty(q) ? NULL : ptrq_remove_head(q)))
 
 #define PTRQ_FOR_EACH_REVERSE(q, ix, e)	\
 	for (ix = ptrq_num_entries(q) - 1;	\
 		 e = ix >= 0 ? ptrq_peek_entry(q, ix) : NULL; --ix)
 
 #define PTRQ_FOR_EACH_WITH_REMOVE_REVERSE(q, e)	\
-	while (e = ptrq_is_empty(q) ? NULL : ptrq_remove_tail(q))
+	while ((e = ptrq_is_empty(q) ? NULL : ptrq_remove_tail(q)))
 
 static inline
 void ptrq_init(struct ptr_queue *this,
@@ -114,14 +114,14 @@ void ptrq_delete_entry(struct ptr_queue *this,
 }
 
 static inline
-void *ptrq_peek_head(struct ptr_queue *this)
+void *ptrq_peek_head(const struct ptr_queue *this)
 {
 	assert(!ptrq_is_empty(this));
 	return ptrq_peek_entry(this, 0);
 }
 
 static inline
-void *ptrq_peek_tail(struct ptr_queue *this)
+void *ptrq_peek_tail(const struct ptr_queue *this)
 {
 	assert(!ptrq_is_empty(this));
 	return ptrq_peek_entry(this, this->num_entries - 1);
@@ -197,7 +197,7 @@ err_t	valq_add_head(struct val_queue *this,
 					  const void *entry);
 
 #define valq_copy(dst, q, ix)	\
-	memcpy(dst, valq_peek_entry(q, ix), q->entry_size)
+	memcpy(dst, valq_peek_entry(q, ix), (q)->entry_size)
 
 #define VALQ_FOR_EACH(q, ix, e)	\
 	for (ix = 0; ix < valq_num_entries(q) ?	valq_copy(&e, q, ix) : false; ++ix)
@@ -269,14 +269,14 @@ void valq_delete_entry(struct val_queue *this,
 }
 
 static inline
-void *valq_peek_head(struct val_queue *this)
+void *valq_peek_head(const struct val_queue *this)
 {
 	assert(!valq_is_empty(this));
 	return valq_peek_entry(this, 0);
 }
 
 static inline
-void *valq_peek_tail(struct val_queue *this)
+void *valq_peek_tail(const struct val_queue *this)
 {
 	assert(!valq_is_empty(this));
 	return valq_peek_entry(this, this->num_entries - 1);
