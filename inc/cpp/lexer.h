@@ -137,6 +137,22 @@ bool lexer_token_is_char_const(const struct lexer_token *this)
 			type <= LXR_TOKEN_WCHAR_T_CHAR_CONST);
 }
 
+static inline
+bool lexer_token_is_key_word(const struct lexer_token *this)
+{
+	enum lexer_token_type type = lexer_token_type(this);
+	return (type >= LXR_TOKEN_ATOMIC &&
+			type <= LXR_TOKEN_DIRECTIVE_WARNING);
+}
+
+static inline
+bool lexer_token_is_punctuator(const struct lexer_token *this)
+{
+	enum lexer_token_type type = lexer_token_type(this);
+	return (type >= LXR_TOKEN_LEFT_BRACE &&
+			type <= LXR_TOKEN_ELLIPSIS);
+}
+
 void	lexer_token_init(struct lexer_token *this);
 void	lexer_token_deref(struct lexer_token *this);
 err_t	lexer_token_evaluate_char_const(const struct lexer_token *this,

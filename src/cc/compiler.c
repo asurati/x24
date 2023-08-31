@@ -16,6 +16,10 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/mman.h>
+
+/* From src/cpp/lexer.c */
+extern const char *g_key_words[];
+extern const char *g_punctuators[];
 /*****************************************************************************/
 static const char *g_cc_token_type_str[] = {
 #define DEF(t)	"CC_TOKEN_" # t,
@@ -27,7 +31,12 @@ static const char *g_cc_token_type_str[] = {
 void cc_token_delete(void *p)
 {
 	struct cc_token *this = p;
-	free((void *)this->string);
+	/*
+	 * Do not free the string for punctuator & key-words. They are
+	 * allocated in .rodata.
+	 */
+	if (!cc_token_is_key_word(this) && !cc_token_is_punctuator(this))
+		free((void *)this->string);
 	free(this);
 }
 
@@ -399,10 +408,28 @@ err_t cc_token_convert_number(struct cc_token *this)
 
 /* uint32_t, uint64_t, string bytes */
 static
-err_t cc_token_stream_convert(struct cc_token_stream *this,
-							  struct cc_token **out)
+err_t cc_token_convert(struct cc_token *this)
 {
 	err_t err;
+	enum cc_token_type type;
+
+	/*
+	 * TODO convert string-literals and char-consts to their exec-char-set
+	 * representation. The char-consts and numbers will also need evaluation;
+	 * compiler optimizations depend on such const-values to perform
+	 * effectively.
+	 */
+	err = ESUCCESS;
+	type = cc_token_type(this);
+	if (type == CC_TOKEN_NUMBER)
+		err = cc_token_convert_number(this);
+	return err;
+}
+
+static
+err_t cc_token_stream_read_token(struct cc_token_stream *this,
+								 struct cc_token **out)
+{
 	struct cc_token *token;
 	char *src;
 	size_t src_len;
@@ -411,10 +438,28 @@ err_t cc_token_stream_convert(struct cc_token_stream *this,
 
 	if (index >= this->buffer_size)
 		return EOF;
+
 	assert(index < this->buffer_size);
 	assert(sizeof(type) == 4);
 	memcpy(&type, &this->buffer[index], sizeof(type));
 	index += sizeof(type);
+	token = malloc(sizeof(*token));
+	if (token == NULL)
+		return ENOMEM;
+	token->type = type;
+
+	/* key-words and punctuators do not have a src-len. */
+	if (cc_token_type_is_key_word(type)) {
+		token->string = g_key_words[type - CC_TOKEN_ATOMIC];
+		token->string_len = strlen(token->string);
+		*out = token;
+		return ESUCCESS;
+	} else if (cc_token_type_is_punctuator(type)) {
+		token->string = g_punctuators[type - CC_TOKEN_LEFT_BRACE];
+		token->string_len = strlen(token->string);
+		*out = token;
+		return ESUCCESS;
+	}
 	memcpy(&src_len, &this->buffer[index], sizeof(src_len));
 	index += sizeof(src_len);
 	src = NULL;
@@ -426,25 +471,10 @@ err_t cc_token_stream_convert(struct cc_token_stream *this,
 		memcpy(src, &this->buffer[index], src_len);
 		index += src_len;
 	}
-	token = malloc(sizeof(*token));
-	if (token == NULL)
-		return ENOMEM;
-	token->type = type;
 	token->string = src;
 	token->string_len = src_len;
-
-	/*
-	 * TODO convert string-literals and char-consts to their exec-char-set
-	 * representation. The char-consts and numbers will also need evaluation;
-	 * compiler optimizations depend on such const-values to perform
-	 * effectively.
-	 */
-	err = ESUCCESS;
-	if (type == CC_TOKEN_NUMBER)
-		err = cc_token_convert_number(token);
-	if (!err)
-		*out = token;
-	return err;
+	*out = token;
+	return ESUCCESS;
 }
 
 static
@@ -461,7 +491,9 @@ err_t cc_token_stream_peek_head(struct cc_token_stream *this,
 	/* Not reading from the cpp_tokens file? EOF */
 	if (this->buffer == NULL)
 		return EOF;
-	err = cc_token_stream_convert(this, out);
+	err = cc_token_stream_read_token(this, out);
+	if (!err)
+		err = cc_token_convert(*out);
 	if (!err)
 		err = ptrq_add_tail(&this->q, *out);
 	return err;
@@ -490,8 +522,6 @@ void cc_grammar_item_print(const struct cc_grammar_item *this)
 	const struct cc_grammar_rule *gr;
 	const enum cc_token_type *ptype;
 	enum cc_token_type type;
-	extern const char *g_key_words[];
-	extern const char *g_punctuators[];
 
 	ge = this->element;
 	printf("[%s ->", &g_cc_token_type_str[ge->type][strlen("CC_TOKEN_")]);

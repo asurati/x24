@@ -515,13 +515,13 @@ err_t lexer_build_source(struct lexer *this,
 	type = lexer_token_type(token);
 
 	/* punctuators do not need to alloc memory for storing src/reslvd */
-	if (type >= LXR_TOKEN_LEFT_BRACE && type <= LXR_TOKEN_ELLIPSIS) {
+	if (lexer_token_is_punctuator(token)) {
 		token->source = g_punctuators[type - LXR_TOKEN_LEFT_BRACE];
 		goto sourced;
 	}
 
 	/* key-words do not need to alloc memory for storing src/reslvd */
-	if (type >= LXR_TOKEN_ATOMIC && type <= LXR_TOKEN_DIRECTIVE_WARNING) {
+	if (lexer_token_is_key_word(token)) {
 		token->source = g_key_words[type - LXR_TOKEN_ATOMIC];
 		goto sourced;
 	}

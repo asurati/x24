@@ -22,6 +22,24 @@ bool cc_token_type_is_non_terminal(const enum cc_token_type this)
 	return this >= CC_TOKEN_TRANSLATION_OBJECT;
 }
 
+static inline
+bool cc_token_type_is_key_word(const enum cc_token_type this)
+{
+	return this >= CC_TOKEN_ATOMIC && this <= CC_TOKEN_WHILE;
+}
+
+static inline
+bool cc_token_type_is_punctuator(const enum cc_token_type this)
+{
+	return this >= CC_TOKEN_LEFT_BRACE && this <= CC_TOKEN_ELLIPSIS;
+}
+
+static inline
+bool cc_token_type_is_identifier(const enum cc_token_type this)
+{
+	return this == CC_TOKEN_IDENTIFIER || cc_token_type_is_key_word(this);
+}
+
 struct cc_token {
 	enum cc_token_type	type;
 
@@ -65,17 +83,21 @@ bool cc_token_is_predefined_const(const struct cc_token *this)
 
 /* a keyword is also an identifier */
 static inline
-bool cc_token_is_keyword(const struct cc_token *this)
+bool cc_token_is_key_word(const struct cc_token *this)
 {
-	return (cc_token_type(this) >= CC_TOKEN_ATOMIC &&
-			cc_token_type(this) <= CC_TOKEN_WHILE);
+	return cc_token_type_is_key_word(cc_token_type(this));
+}
+
+static inline
+bool cc_token_is_punctuator(const struct cc_token *this)
+{
+	return cc_token_type_is_punctuator(cc_token_type(this));
 }
 
 static inline
 bool cc_token_is_identifier(const struct cc_token *this)
 {
-	return (cc_token_type(this) >= CC_TOKEN_IDENTIFIER &&
-			cc_token_type(this) <= CC_TOKEN_WHILE);
+	return cc_token_type_is_identifier(cc_token_type(this));
 }
 
 static inline

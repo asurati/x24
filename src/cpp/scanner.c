@@ -3210,9 +3210,14 @@ err_t scanner_serialize_cpp_token(struct scanner *this,
 	if (ret < 0)
 		return errno;
 
+	/* Write nothing more for keywords and punctuators */
+	if (cpp_token_is_key_word(token) ||
+		cpp_token_is_punctuator(token))
+		return ESUCCESS;
+
 	src_len = cpp_token_source_length(token);
 
-	/* Then write source_len */
+	/* Write source_len. */
 	buf = &src_len;
 	size = sizeof(src_len);
 	ret = write(this->cpp_tokens_fd, buf, size);
