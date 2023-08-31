@@ -1283,7 +1283,7 @@ void serialize()
 
 void detect_shift_reduce_conflicts()
 {
-	int i, j, k, l, m, n;
+	int i, j, k, l;
 	const struct item_set *set;
 	const struct element *e;
 	const struct rule *r;
@@ -1317,7 +1317,7 @@ void detect_shift_reduce_conflicts()
 
 void detect_reduce_reduce_conflicts()
 {
-	int i, j, k, l, m, n;
+	int i, j, k, m, n;
 	const struct item_set *set;
 	const struct element *e;
 	const struct rule *r;
@@ -1342,7 +1342,7 @@ void detect_reduce_reduce_conflicts()
 					for (n = 0; n < item[1]->num_las; ++n) {
 						if (item[0]->las[m] == item[1]->las[n])
 							printf("rr i=%d,j=%d,k=%d,m=%d,n=%d %s\n",
-								  i, j, k, l, m, n,
+								  i, j, k, m, n,
 								  elements[item[0]->las[m]].name);
 					}
 				}
