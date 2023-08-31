@@ -29,8 +29,8 @@
 err_t cc_load_grammar(struct compiler *this)
 {
 	err_t err;
-	int fd, i, j, k, num_elements, num_rules, num_rhs;
-	struct cc_grammar_element ge;
+	int fd, i, j, k, num_elements, num_rules, num_rhs, num_non_terminals;
+	struct cc_grammar_element ge, *pge[2];
 	struct cc_grammar_rule gr;
 	enum cc_token_type type;
 
@@ -41,23 +41,45 @@ err_t cc_load_grammar(struct compiler *this)
 		return errno;
 	assert(num_elements);	/* # of non-terminal elements */
 	/* All elements are ordered by their type in incr. order */
-	for (i = 0; i < num_elements; ++i) {
-		valq_init(&ge.rules, sizeof(gr), cc_grammar_rule_delete);
 
-		if (read(fd, &ge.type, sizeof(ge.type)) < 0)
+	/*
+	 * First add all elements in order their values in the cc_token_type enum,
+	 * since the rules point to the element objs
+	 */
+	num_non_terminals = CC_TOKEN_FUNCTION_BODY - CC_TOKEN_TRANSLATION_OBJECT;
+	assert(num_elements == num_non_terminals);
+	type = CC_TOKEN_TRANSLATION_OBJECT;
+	for (i = 0; i < num_non_terminals; ++i) {
+		/* init ge */
+		ge.type = type++;
+		valq_init(&ge.rules, sizeof(gr), cc_grammar_rule_delete);
+		err = valq_add_tail(&this->elements, &ge);
+		if (err)
+			return err;
+	}
+
+	/* Now add the details. */
+	for (i = 0; i < num_elements; ++i) {
+		pge[0] = valq_peek_entry(&this->elements, i);
+		if (read(fd, &type, sizeof(type)) < 0)
 			return errno;
-		assert(ge.type >= CC_TOKEN_TRANSLATION_OBJECT);
-		/* Must be a non-terminal */
+
+		/* The file must not contain any terminals */
+		assert(cc_token_type_is_non_terminal(type));
+
+		/* The bin file must also contain the elements in order */
+		assert(pge[0]->type == type);
 
 		if (read(fd, &num_rules, sizeof(num_rules)) < 0)
 			return errno;
 		assert(num_rules);
-
 		for (j = 0; j < num_rules; ++j) {
-			valq_init(&gr.elements, sizeof(int), NULL);
+			valq_init(&gr.elements, sizeof(type), NULL);
+#if 0
 			err = valq_add_tail(&gr.elements, &ge.type);	/* lhs */
 			if (err)
 				return err;
+#endif
 			if (read(fd, &num_rhs, sizeof(num_rhs)) < 0)
 				return errno;
 			assert(num_rhs);
@@ -68,13 +90,10 @@ err_t cc_load_grammar(struct compiler *this)
 				if (err)
 					return err;
 			}
-			err = valq_add_tail(&ge.rules, &gr);
+			err = valq_add_tail(&pge[0]->rules, &gr);
 			if (err)
 				return err;
 		}
-		err = valq_add_tail(&this->elements, &ge);
-		if (err)
-			return err;
 	}
 	close(fd);
 	return ESUCCESS;

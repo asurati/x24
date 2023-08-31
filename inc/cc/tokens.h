@@ -6,7 +6,7 @@
  * All of these are non-terminals.
  */
 
-DEF(TRANSLATION_OBJECT)
+DEF(TRANSLATION_OBJECT)	/* Must be kept first in this file */
 DEF(TRANSLATION_UNIT)
 DEF(EXTERNAL_DECLARATION)
 DEF(PRIMARY_EXPRESSION)

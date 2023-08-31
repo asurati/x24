@@ -16,6 +16,12 @@ enum cc_token_type {
 #undef DEF
 };
 
+static inline
+bool cc_token_type_is_non_terminal(const enum cc_token_type this)
+{
+	return this >= CC_TOKEN_TRANSLATION_OBJECT;
+}
+
 struct cc_token {
 	enum cc_token_type	type;
 
@@ -131,8 +137,9 @@ void cc_token_stream_empty(struct cc_token_stream *this)
 	ptrq_empty(&this->q);
 }
 /*****************************************************************************/
+/* an element can be either a terminal or a non-terminal. */
 struct cc_grammar_rule {
-	struct val_queue	elements;	/* the first int is lhs, rest is rhs */
+	struct val_queue	elements;
 };
 
 void cc_grammar_rule_delete(void *p);
@@ -144,8 +151,8 @@ struct cc_grammar_element {
 };
 
 struct cc_grammar_item {
-	int	element;
-	int	rule;
+	const struct cc_grammar_element	*element;	/* The lhs element */
+	int	rule;	/* index into ge.rules */
 	int	dot_position;	/* 0 <= dot-pos <= rule.num_entries */
 	int	origin;
 	/*
@@ -153,6 +160,8 @@ struct cc_grammar_item {
 	 * was added by the prediction.
 	 */
 };
+
+void cc_grammar_item_delete(void *p);
 
 /*
  * Earley item-set.
@@ -162,8 +171,25 @@ struct cc_grammar_item {
  * TODO McLean/Horspool impl to combine lr(1) and Earley.
  */
 struct cc_grammar_item_set {
-	struct ptr_queue	items;	/* Each q-entry is cc_gram_item* */
+	int index;
+	struct ptr_queue	reduce_items;
+	struct ptr_queue	shift_items;
+	struct cc_token		*token;
+	/*
+	 * Token is valid for item-set-#1 and above. It is stored here until the
+	 * parse is complete, after which it will become parse of the parse tree.
+	 */
 };
+
+static inline
+void cc_grammar_item_set_init(struct cc_grammar_item_set *this,
+							  const int index)
+{
+	ptrq_init(&this->reduce_items, cc_grammar_item_delete);
+	ptrq_init(&this->shift_items, cc_grammar_item_delete);
+	this->token = NULL;
+	this->index = index;
+}
 
 /*
  * token is meant to store token that need its string info to
@@ -177,7 +203,7 @@ struct cc_parse_node {
 };
 /*****************************************************************************/
 struct compiler {
-	struct val_queue	elements;
+	struct val_queue	elements;	/* Only non-terminals */
 	struct val_queue	item_sets;
 
 	int	cpp_tokens_fd;
