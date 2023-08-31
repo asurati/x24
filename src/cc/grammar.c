@@ -47,6 +47,7 @@ err_t cc_load_grammar(struct compiler *this)
 	 * since the rules point to the element objs
 	 */
 	num_non_terminals = CC_TOKEN_FUNCTION_BODY - CC_TOKEN_TRANSLATION_OBJECT;
+	++num_non_terminals;
 	assert(num_elements == num_non_terminals);
 	type = CC_TOKEN_TRANSLATION_OBJECT;
 	for (i = 0; i < num_non_terminals; ++i) {
