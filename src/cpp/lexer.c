@@ -39,7 +39,7 @@ static const char *g_lexer_token_type_strs[] = {
 #undef DEF
 };
 
-static const char *g_punctuators[] = {
+const char *g_punctuators[] = {
 	/* Single-char tokens */
 	"{",
 	"[",
@@ -101,7 +101,7 @@ static const char *g_punctuators[] = {
 	"...",
 };
 
-static const char *g_key_words[] = {
+const char *g_key_words[] = {
 	"_Atomic",
 	"_BitInt",
 	"_Complex",

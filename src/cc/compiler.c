@@ -67,8 +67,11 @@ void cc_grammar_item_set_delete(void *p)
 	ptrq_empty(&this->shift_items);
 	/*
 	 * For successful parses, this->token is removed from the item-set and made
-	 * part of the parse tree.
+	 * part of the parse tree. Until the parse-tree is built, this function is
+	 * responsible for deleting the token.
 	 */
+	if (this->token)
+		cc_token_delete(this->token);
 }
 
 void cc_parse_node_delete(void *p)
@@ -129,6 +132,7 @@ err_t cc_grammar_item_set_add_item(struct cc_grammar_item_set *this,
 								   struct cc_grammar_item *item)
 
 {
+	err_t err;
 	int num_rules, num_rhs;
 	const struct cc_grammar_element *ge;
 	const struct cc_grammar_rule *gr;
@@ -146,8 +150,12 @@ err_t cc_grammar_item_set_add_item(struct cc_grammar_item_set *this,
 	assert(num_rhs);
 
 	if (item->dot_position == num_rhs)
-		return cc_grammar_item_set_add_reduce_item(this, item);
-	return cc_grammar_item_set_add_shift_item(this, item);
+		err = cc_grammar_item_set_add_reduce_item(this, item);
+	else
+		err = cc_grammar_item_set_add_shift_item(this, item);
+	if (err == EEXIST)
+		cc_grammar_item_delete(item);
+	return err;
 }
 /*****************************************************************************/
 err_t compiler_new(const char *path,
@@ -482,9 +490,11 @@ void cc_grammar_item_print(const struct cc_grammar_item *this)
 	const struct cc_grammar_rule *gr;
 	const enum cc_token_type *ptype;
 	enum cc_token_type type;
+	extern const char *g_key_words[];
+	extern const char *g_punctuators[];
 
 	ge = this->element;
-	printf("[%s ->", g_cc_token_type_str[ge->type]);
+	printf("[%s ->", &g_cc_token_type_str[ge->type][strlen("CC_TOKEN_")]);
 	gr = valq_peek_entry(&ge->rules, this->rule);
 	num_rhs = valq_num_entries(&gr->elements);
 	for (i = 0; i < num_rhs; ++i) {
@@ -492,7 +502,13 @@ void cc_grammar_item_print(const struct cc_grammar_item *this)
 		type = *ptype;
 		if (this->dot_position == i)
 			printf(" .");
-		printf(" %s", g_cc_token_type_str[type]);
+		/* If type is a key-word or punctuator, print it */
+		if (type >= CC_TOKEN_ATOMIC && type <= CC_TOKEN_WHILE)
+			printf(" %s", g_key_words[type - CC_TOKEN_ATOMIC]);
+		else if (type >= CC_TOKEN_LEFT_BRACE && type <= CC_TOKEN_ELLIPSIS)
+			printf(" %s", g_punctuators[type - CC_TOKEN_LEFT_BRACE]);
+		else
+			printf(" %s", &g_cc_token_type_str[type][strlen("CC_TOKEN_")]);
 	}
 	if (this->dot_position == i)
 		printf(" .");
@@ -717,7 +733,10 @@ err_t compiler_parse(struct compiler *this)
 	while (true) {
 		set = valq_peek_entry(&this->item_sets, index);
 		assert(set);
-		set->token = token;
+		if (token) {
+			set->token = token;
+			cc_token_print(token);
+		}
 		do {
 			set_changed = false;
 			/*
@@ -740,7 +759,6 @@ err_t compiler_parse(struct compiler *this)
 			err = err == EOF ? ESUCCESS : err;
 			break;
 		}
-		cc_token_print(token);
 		err = compiler_run_scanning(this, set, token);
 		if (err)
 			return err;
