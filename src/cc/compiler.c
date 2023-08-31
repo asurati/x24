@@ -46,7 +46,7 @@ void cc_token_print(const struct cc_token *this)
 	const char *type = g_cc_token_type_str[this->type];
 	printf("%s: %s", __func__, type);
 	if (this->string)
-		printf(" %s", this->string);
+		printf(" '%s'", this->string);
 	printf("\n");
 }
 /*****************************************************************************/
@@ -539,6 +539,10 @@ void cc_grammar_item_print(const struct cc_grammar_item *this)
 			printf(" %s", g_punctuators[type - CC_TOKEN_LEFT_BRACE]);
 		else
 			printf(" %s", &g_cc_token_type_str[type][strlen("CC_TOKEN_")]);
+		if (i == this->dot_position - 1 && this->back) {
+			assert(cc_token_type_is_non_terminal(type));
+			printf("(%d,%d)", this->back_item_set, this->back_item);
+		}
 	}
 	if (this->dot_position == i)
 		printf(" .");
@@ -555,15 +559,19 @@ void cc_grammar_item_set_print(const struct cc_grammar_item_set *set)
 	num_items = ptrq_num_entries(q);
 	printf("item-set[%4d]:r[%4d]----------------------\n", set->index,
 		   num_items);
-	for (i = 0; i < num_items; ++i)
+	for (i = 0; i < num_items; ++i) {
+		printf("[%4d]:", i);
 		cc_grammar_item_print(ptrq_peek_entry(q, i));
+	}
 
 	q = &set->shift_items;
 	num_items = ptrq_num_entries(q);
 	printf("item-set[%4d]:s[%4d]----------------------\n", set->index,
 		   num_items);
-	for (i = 0; i < num_items; ++i)
+	for (i = 0; i < num_items; ++i) {
+		printf("[%4d]:", i);
 		cc_grammar_item_print(ptrq_peek_entry(q, i));
+	}
 
 	printf("item-set[%4d]:done-------------------------\n", set->index);
 	printf("\n");
@@ -610,6 +618,7 @@ err_t compiler_run_scanning(struct compiler *this,
 		if (ti == NULL)
 			return ENOMEM;
 		*ti = *item;
+		ti->back = NULL;	/* dot is after a terminal. */
 		++ti->dot_position;
 		err = cc_grammar_item_set_add_item(&ts, ti);
 		if (!err)
@@ -677,6 +686,9 @@ err_t compiler_run_completion(const struct compiler *this,
 					return ENOMEM;
 				*ti = *items[1];
 				++ti->dot_position;
+				ti->back = items[0];
+				ti->back_item_set = sets[0]->index;
+				ti->back_item = i;
 				err = cc_grammar_item_set_add_item(set, ti);
 				if (!err) {
 					++num_items_added;
@@ -726,12 +738,11 @@ err_t compiler_run_prediction(const struct compiler *this,
 			assert(ge->type == type);
 			num_rules = valq_num_entries(&ge->rules);
 			for (j = 0; j < num_rules; ++j) {
-				ti = malloc(sizeof(*ti));
+				ti = calloc(1, sizeof(*ti));
 				if (ti == NULL)
 					return ENOMEM;
 				ti->element = ge;
 				ti->rule = j;
-				ti->dot_position = 0;
 				ti->origin = set->index;
 				err = cc_grammar_item_set_add_item(set, ti);
 				if (!err) {

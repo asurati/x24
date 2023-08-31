@@ -162,6 +162,7 @@ void cc_token_stream_empty(struct cc_token_stream *this)
 /* an element can be either a terminal or a non-terminal. */
 struct cc_grammar_rule {
 	struct val_queue	elements;
+	int	num_non_terminals;	/* Useful when allocating back-ptrs */
 };
 
 void cc_grammar_rule_delete(void *p);
@@ -172,6 +173,26 @@ struct cc_grammar_element {
 	struct val_queue	rules;
 };
 
+#if 0
+/*
+ * element, rule, origin uniqueuely identifies an item.
+ * We can therefore place array of back pointers here.
+ */
+struct cc_base_item {
+	const struct cc_grammar_element	*element;	/* the lhs element */
+	int	rule;	/* index into ge.rules */
+
+	/* The item-set where this item with dot-pos 0 was added by predn */
+	int	origin;
+	int	ref_count;
+
+	/*
+	 * 0th non-terminal in the rhs is at index 0, etc.
+	 * Each entry in the queue is a cc_grammar_item*.
+	 */
+	struct ptr_queue	back;
+};
+#endif
 struct cc_grammar_item {
 	const struct cc_grammar_element	*element;	/* The lhs element */
 	int	rule;	/* index into ge.rules */
@@ -181,6 +202,15 @@ struct cc_grammar_item {
 	 * origin is the item-set where the corresponding item with dot-pos == 0
 	 * was added by the prediction.
 	 */
+
+	/*
+	 * If this item is being added because of a completion of another item,
+	 * this item must point back to the reduce-item that cause this item to be
+	 * added.
+	 */
+	const struct cc_grammar_item *back;
+	int	back_item_set;
+	int	back_item;
 };
 
 void cc_grammar_item_delete(void *p);

@@ -76,6 +76,7 @@ err_t cc_load_grammar(struct compiler *this)
 		assert(num_rules);
 		for (j = 0; j < num_rules; ++j) {
 			valq_init(&gr.elements, sizeof(type), NULL);
+			gr.num_non_terminals = 0;
 #if 0
 			err = valq_add_tail(&gr.elements, &ge.type);	/* lhs */
 			if (err)
@@ -87,6 +88,8 @@ err_t cc_load_grammar(struct compiler *this)
 			for (k = 0; k < num_rhs; ++k) {
 				if (read(fd, &type, sizeof(type)) < 0)
 					return errno;
+				if (cc_token_type_is_non_terminal(type))
+					++gr.num_non_terminals;
 				err = valq_add_tail(&gr.elements, &type);
 				if (err)
 					return err;
