@@ -20,6 +20,7 @@
 static const char *g_cc_token_type_str[] = {
 #define DEF(t)	"CC_TOKEN_" # t,
 #include <inc/cpp/tokens.h>
+#include <inc/cc/tokens.h>
 #undef DEF
 };
 
@@ -400,6 +401,9 @@ err_t cc_token_stream_convert(struct cc_token_stream *this,
 	enum cc_token_type type;	/* lxr_token_type == cc_token_type */
 	static size_t index = 0;
 
+	if (index >= this->buffer_size)
+		return EOF;
+	assert(index < this->buffer_size);
 	assert(sizeof(type) == 4);
 	memcpy(&type, &this->buffer[index], sizeof(type));
 	index += sizeof(type);
@@ -470,6 +474,55 @@ err_t cc_token_stream_remove_head(struct cc_token_stream *this,
 	return err;
 }
 /*****************************************************************************/
+static
+void cc_grammar_item_print(const struct cc_grammar_item *this)
+{
+	int i, num_rhs;
+	const struct cc_grammar_element *ge;
+	const struct cc_grammar_rule *gr;
+	const enum cc_token_type *ptype;
+	enum cc_token_type type;
+
+	ge = this->element;
+	printf("[%s ->", g_cc_token_type_str[ge->type]);
+	gr = valq_peek_entry(&ge->rules, this->rule);
+	num_rhs = valq_num_entries(&gr->elements);
+	for (i = 0; i < num_rhs; ++i) {
+		ptype = valq_peek_entry(&gr->elements, i);
+		type = *ptype;
+		if (this->dot_position == i)
+			printf(" .");
+		printf(" %s", g_cc_token_type_str[type]);
+	}
+	if (this->dot_position == i)
+		printf(" .");
+	printf("] (%d)", this->origin);
+	printf("\n");
+}
+
+void cc_grammar_item_set_print(const struct cc_grammar_item_set *set)
+{
+	int num_items, i;
+	const struct ptr_queue *q;
+
+	q = &set->reduce_items;
+	num_items = ptrq_num_entries(q);
+	printf("item-set[%4d]:r[%4d]----------------------\n", set->index,
+		   num_items);
+	for (i = 0; i < num_items; ++i)
+		cc_grammar_item_print(ptrq_peek_entry(q, i));
+
+	q = &set->shift_items;
+	num_items = ptrq_num_entries(q);
+	printf("item-set[%4d]:s[%4d]----------------------\n", set->index,
+		   num_items);
+	for (i = 0; i < num_items; ++i)
+		cc_grammar_item_print(ptrq_peek_entry(q, i));
+
+	printf("item-set[%4d]:done-------------------------\n", set->index);
+	printf("\n");
+}
+
 static
 err_t compiler_run_scanning(struct compiler *this,
 							const struct cc_grammar_item_set *set,
@@ -554,7 +607,7 @@ err_t compiler_run_completion(const struct compiler *this,
 			 */
 			num_items[1] = ptrq_num_entries(&sets[1]->shift_items);
 			for (j = 0; j < num_items[1]; ++j) {
-				items[1] = ptrq_peek_entry(&sets[1]->shift_items, i);
+				items[1] = ptrq_peek_entry(&sets[1]->shift_items, j);
 				ge = items[1]->element;
 				assert(ge);
 				num_rules = valq_num_entries(&ge->rules);
@@ -567,6 +620,8 @@ err_t compiler_run_completion(const struct compiler *this,
 				assert(items[1]->dot_position < num_rhs);
 				ptype = valq_peek_entry(&gr->elements, items[1]->dot_position);
 				type = *ptype;
+				if (!cc_token_type_is_non_terminal(type))
+					continue;
 				index = type - CC_TOKEN_TRANSLATION_OBJECT;
 				ge = valq_peek_entry(&this->elements, index);
 				if (ge != items[0]->element)
@@ -658,9 +713,11 @@ err_t compiler_parse(struct compiler *this)
 
 	err = EINVAL;
 	index = 0;
+	token = NULL;
 	while (true) {
 		set = valq_peek_entry(&this->item_sets, index);
 		assert(set);
+		set->token = token;
 		do {
 			set_changed = false;
 			/*
@@ -677,6 +734,7 @@ err_t compiler_parse(struct compiler *this)
 				return err;
 		} while (set_changed);
 
+		cc_grammar_item_set_print(set);
 		err = cc_token_stream_remove_head(&this->stream, &token);
 		if (err) {
 			err = err == EOF ? ESUCCESS : err;
