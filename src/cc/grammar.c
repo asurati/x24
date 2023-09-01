@@ -76,7 +76,6 @@ err_t cc_load_grammar(struct compiler *this)
 		assert(num_rules);
 		for (j = 0; j < num_rules; ++j) {
 			valq_init(&gr.elements, sizeof(type), NULL);
-			ptrq_init(&gr.base_items, cc_grammar_item_base_delete);
 #if 0
 			err = valq_add_tail(&gr.elements, &ge.type);	/* lhs */
 			if (err)

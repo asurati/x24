@@ -159,89 +159,76 @@ void cc_token_stream_empty(struct cc_token_stream *this)
 	ptrq_empty(&this->q);
 }
 /*****************************************************************************/
-struct cc_grammar_derivation {
-	int	item_set;
-	int	item;	/* index into the reduce-items of the item-set */
-};
-
-/*
- * element, rule, origin uniquely identifies an item.
- * We can therefore place array of back pointers here.
- * A new base-item is created only during prediction.
- *
- * When a completion is processed, the item that is added has its dot-pos
- * moved, and a new back-ptr is added.
- *
- * When a terminal is scanned, the base-item remains the same, the dot-pos
- * moves across the terminal.
- */
-struct cc_grammar_element;
-struct cc_grammar_item_base {
-	/* the lhs non-term */
-	struct cc_grammar_element *element;
-	int	rule;		/* index into ge.rules */
-	/* The item-set where the item with dot-pos 0 was added by predn */
-	int	origin;
-	struct val_queue	back;
-};
-
-void cc_grammar_item_base_delete(void *p);
-
-static inline
-void cc_grammar_item_base_init(struct cc_grammar_item_base *this,
-							   struct cc_grammar_element *element,
-							   const int rule,
-							   const int origin)
-{
-	this->element = element;
-	this->rule = rule;
-	this->origin = origin;
-	valq_init(&this->back, sizeof(struct cc_grammar_derivation), NULL);
-}
-
 /* an element can be either a terminal or a non-terminal. */
 struct cc_grammar_rule {
 	struct val_queue	elements;
-	/*
-	 * Maintain in incr. order of origin, so that we can employ binary search
-	 * algorithm
-	 */
-	struct ptr_queue	base_items;	/* [element,rule,origin] */
 };
 
 void cc_grammar_rule_delete(void *p);
 
-/* Only non-terminals */
+/* terminals + non-terminals. rules valid for non-terminals alone */
 struct cc_grammar_element {
 	enum cc_token_type	type;
 	struct val_queue	rules;
 };
 
+#if 0
 /*
- * If some structure takes a pointer to an entry in the valq, the next time the
- * valq is realloc'd, the pointer may become invalid as realloc may reallocate
- * the entire valq into another region.
+ * element, rule, origin uniqueuely identifies an item.
+ * We can therefore place array of back pointers here.
  */
+struct cc_base_item {
+	const struct cc_grammar_element	*element;	/* the lhs element */
+	int	rule;	/* index into ge.rules */
+
+	/* The item-set where this item with dot-pos 0 was added by predn */
+	int	origin;
+	int	ref_count;
+
+	/*
+	 * 0th non-terminal in the rhs is at index 0, etc.
+	 * Each entry in the queue is a cc_grammar_item*.
+	 */
+	struct ptr_queue	back;
+};
+#endif
 struct cc_grammar_item {
-	struct cc_grammar_item_base *base;
+	const struct cc_grammar_element	*element;	/* The lhs element */
+	int	rule;	/* index into ge.rules */
 	int	dot_position;	/* 0 <= dot-pos <= rule.num_entries */
+	int	origin;
+	/*
+	 * origin is the item-set where the corresponding item with dot-pos == 0
+	 * was added by the prediction.
+	 */
+
+	/*
+	 * If this item is being added because of a completion of another item,
+	 * this item must point back to the reduce-item that cause this item to be
+	 * added.
+	 */
+	const struct cc_grammar_item *back;
+	int	back_item_set;
+	int	back_item;
 };
 
-static
-void cc_grammar_item_delete(void *p)
-{
-	(void)p;
-}
+void cc_grammar_item_delete(void *p);
 
-/* Earley item-set. TODO McLean/Horspool */
+/*
+ * Earley item-set.
+ * As long as any item still points to the item-set, we cannot free it.
+ * items whose origin is the same as the item-set do not contribute to the
+ * ref-count.
+ * TODO McLean/Horspool impl to combine lr(1) and Earley.
+ */
 struct cc_grammar_item_set {
-	int index;	/* May need to change it to 64-bit */
-	struct val_queue	reduce_items;
-	struct val_queue	shift_items;
+	int index;
+	struct ptr_queue	reduce_items;
+	struct ptr_queue	shift_items;
 	struct cc_token		*token;
 	/*
 	 * Token is valid for item-set-#1 and above. It is stored here until the
-	 * parse is complete, after which it will become part of the parse tree.
+	 * parse is complete, after which it will become parse of the parse tree.
 	 */
 };
 
@@ -249,9 +236,8 @@ static inline
 void cc_grammar_item_set_init(struct cc_grammar_item_set *this,
 							  const int index)
 {
-	size_t size = sizeof(struct cc_grammar_item);
-	valq_init(&this->reduce_items, size, cc_grammar_item_delete);
-	valq_init(&this->shift_items, size, cc_grammar_item_delete);
+	ptrq_init(&this->reduce_items, cc_grammar_item_delete);
+	ptrq_init(&this->shift_items, cc_grammar_item_delete);
 	this->token = NULL;
 	this->index = index;
 }
