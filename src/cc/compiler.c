@@ -53,6 +53,7 @@ void cc_token_print(const struct cc_token *this)
 void cc_grammar_rule_delete(void *p)
 {
 	struct cc_grammar_rule *this = p;
+	ptrq_empty(&this->base_items);
 	free(this->elements.entries);
 }
 
@@ -63,17 +64,19 @@ void cc_grammar_element_delete(void *p)
 	valq_empty(&this->rules);
 }
 
-void cc_grammar_item_delete(void *p)
+void cc_grammar_item_base_delete(void *p)
 {
-	free(p);
+	struct cc_grammar_item_base *this = p;
+	free(this->back.entries);
+	free(this);
 }
 
 static
 void cc_grammar_item_set_delete(void *p)
 {
 	struct cc_grammar_item_set *this = p;
-	ptrq_empty(&this->reduce_items);
-	ptrq_empty(&this->shift_items);
+	valq_empty(&this->reduce_items);
+	valq_empty(&this->shift_items);
 	/*
 	 * For successful parses, this->token is removed from the item-set and made
 	 * part of the parse tree. Until the parse-tree is built, this function is
@@ -98,20 +101,16 @@ cc_grammar_item_set_find_item(const struct cc_grammar_item_set *this,
 							  const struct cc_grammar_item *item)
 {
 	int i;
-	const struct cc_grammar_item *t;
-	const struct ptr_queue *q;
+	struct cc_grammar_item ti;
+	const struct val_queue *q;
 
 	q = &this->reduce_items;
 	if (is_shift_item)
 		q = &this->shift_items;
-	PTRQ_FOR_EACH(q, i, t) {
-		if (t->element != item->element)
+	VALQ_FOR_EACH(q, i, ti) {
+		if (ti.base != item->base)
 			continue;
-		if (t->rule != item->rule)
-			continue;
-		if (t->dot_position != item->dot_position)
-			continue;
-		if (t->origin != item->origin)
+		if (ti.dot_position != item->dot_position)
 			continue;
 		return true;
 	}
@@ -120,51 +119,49 @@ cc_grammar_item_set_find_item(const struct cc_grammar_item_set *this,
 
 static
 err_t cc_grammar_item_set_add_shift_item(struct cc_grammar_item_set *this,
-										 struct cc_grammar_item *item)
+										 const struct cc_grammar_item *item)
 {
 	if (cc_grammar_item_set_find_item(this, true, item))
 		return EEXIST;
-	return ptrq_add_tail(&this->shift_items, item);
+	return valq_add_tail(&this->shift_items, item);
 }
 
 static
 err_t cc_grammar_item_set_add_reduce_item(struct cc_grammar_item_set *this,
-										  struct cc_grammar_item *item)
+										  const struct cc_grammar_item *item)
 {
 	if (cc_grammar_item_set_find_item(this, false, item))
 		return EEXIST;
-	return ptrq_add_tail(&this->reduce_items, item);
+	return valq_add_tail(&this->reduce_items, item);
 }
 
 static
 err_t cc_grammar_item_set_add_item(struct cc_grammar_item_set *this,
-								   struct cc_grammar_item *item)
+								   const struct cc_grammar_item *item)
 
 {
-	err_t err;
 	int num_rules, num_rhs;
 	const struct cc_grammar_element *ge;
 	const struct cc_grammar_rule *gr;
+	const struct cc_grammar_item_base *base;
 
-	ge = item->element;
+	base = item->base;
+	assert(base);
+	ge = base->element;
 	assert(ge);
 	assert(cc_token_type_is_non_terminal(ge->type));
 
 	num_rules = valq_num_entries(&ge->rules);
 	assert(num_rules);
-	assert(0 <= item->rule && item->rule < num_rules);
-	gr = valq_peek_entry(&ge->rules, item->rule);
+	assert(0 <= base->rule && base->rule < num_rules);
+	gr = valq_peek_entry(&ge->rules, base->rule);
 	assert(gr);
 	num_rhs = valq_num_entries(&gr->elements);
 	assert(num_rhs);
 
 	if (item->dot_position == num_rhs)
-		err = cc_grammar_item_set_add_reduce_item(this, item);
-	else
-		err = cc_grammar_item_set_add_shift_item(this, item);
-	if (err == EEXIST)
-		cc_grammar_item_delete(item);
-	return err;
+		return cc_grammar_item_set_add_reduce_item(this, item);
+	return cc_grammar_item_set_add_shift_item(this, item);
 }
 /*****************************************************************************/
 err_t compiler_new(const char *path,
@@ -236,6 +233,68 @@ err_t compiler_delete(struct compiler *this)
 	valq_empty(&this->item_sets);
 	free(this);
 	return ESUCCESS;
+}
+/*****************************************************************************/
+/* Find base-item by comparing the actual contents */
+static int max_num_base_items;
+static
+err_t cc_grammar_rule_find_base_item(const struct cc_grammar_rule *this,
+									 const struct cc_grammar_item_base *base)
+{
+	int i;
+	const struct cc_grammar_item_base *tb;
+
+	/* TODO: Fix this Bottleneck */
+	PTRQ_FOR_EACH(&this->base_items, i, tb) {
+		if (tb->element != base->element)
+			continue;
+		if (tb->rule != base->rule)
+			continue;
+		if (tb->origin != base->origin)
+			continue;
+		return i;
+	}
+	return EOF;
+}
+
+static
+err_t cc_grammar_rule_add_base_item(struct cc_grammar_rule *this,
+									struct cc_grammar_item_base *base,
+									struct cc_grammar_item_base **out)
+{
+	err_t err;
+	int i;
+
+	i = cc_grammar_rule_find_base_item(this, base);
+	if (i == EOF) {
+		i = ptrq_num_entries(&this->base_items);
+		err = ptrq_add_tail(&this->base_items, base);
+		if (err)
+			return err;
+		if (i + 1 > max_num_base_items)
+			max_num_base_items = i + 1;
+	} else {
+		cc_grammar_item_base_delete(base);
+	}
+	assert(0 <= i && i < ptrq_num_entries(&this->base_items));
+	*out = ptrq_peek_entry(&this->base_items, i);
+	return ESUCCESS;
+}
+
+static
+err_t cc_grammar_element_add_base_item(struct cc_grammar_element *this,
+									   struct cc_grammar_item_base *base,
+									   struct cc_grammar_item_base **out)
+{
+	struct cc_grammar_rule *gr;
+	int num_rules;
+
+	assert(base->element == this);
+	num_rules = valq_num_entries(&this->rules);
+	assert(base->rule < num_rules);
+	gr = valq_peek_entry(&this->rules, base->rule);
+	assert(gr);
+	return cc_grammar_rule_add_base_item(gr, base, out);
 }
 /*****************************************************************************/
 static
@@ -517,17 +576,20 @@ err_t cc_token_stream_remove_head(struct cc_token_stream *this,
 static
 void cc_grammar_item_print(const struct cc_grammar_item *this)
 {
-	int i, num_rhs;
+	int i, num_rhs, index;
+	const struct cc_grammar_derivation *derive;
+	const struct cc_grammar_item_base *base;
 	const struct cc_grammar_element *ge;
 	const struct cc_grammar_rule *gr;
 	const enum cc_token_type *ptype;
 	enum cc_token_type type;
 
-	ge = this->element;
+	base = this->base;
+	ge = base->element;
 	printf("[%s ->", &g_cc_token_type_str[ge->type][strlen("CC_TOKEN_")]);
-	gr = valq_peek_entry(&ge->rules, this->rule);
+	gr = valq_peek_entry(&ge->rules, base->rule);
 	num_rhs = valq_num_entries(&gr->elements);
-	for (i = 0; i < num_rhs; ++i) {
+	for (i = index = 0; i < num_rhs; ++i) {
 		ptype = valq_peek_entry(&gr->elements, i);
 		type = *ptype;
 		if (this->dot_position == i)
@@ -539,38 +601,41 @@ void cc_grammar_item_print(const struct cc_grammar_item *this)
 			printf(" %s", g_punctuators[type - CC_TOKEN_LEFT_BRACE]);
 		else
 			printf(" %s", &g_cc_token_type_str[type][strlen("CC_TOKEN_")]);
-		if (i == this->dot_position - 1 && this->back) {
-			assert(cc_token_type_is_non_terminal(type));
-			printf("(%d,%d)", this->back_item_set, this->back_item);
-		}
+		if (!cc_token_type_is_non_terminal(type))
+			continue;
+		if (index >= valq_num_entries(&base->back))
+			continue;
+		/* Print the item-set# and the reduction rule */
+		derive = valq_peek_entry(&base->back, index++);
+		printf("(%d,%d)", derive->item_set, derive->item);
 	}
 	if (this->dot_position == i)
 		printf(" .");
-	printf("] (%d)", this->origin);
+	printf("] (%d)", base->origin);
 	printf("\n");
 }
 
 void cc_grammar_item_set_print(const struct cc_grammar_item_set *set)
 {
 	int num_items, i;
-	const struct ptr_queue *q;
+	const struct val_queue *q;
 
 	q = &set->reduce_items;
-	num_items = ptrq_num_entries(q);
+	num_items = valq_num_entries(q);
 	printf("item-set[%4d]:r[%4d]----------------------\n", set->index,
 		   num_items);
 	for (i = 0; i < num_items; ++i) {
 		printf("[%4d]:", i);
-		cc_grammar_item_print(ptrq_peek_entry(q, i));
+		cc_grammar_item_print(valq_peek_entry(q, i));
 	}
 
 	q = &set->shift_items;
-	num_items = ptrq_num_entries(q);
+	num_items = valq_num_entries(q);
 	printf("item-set[%4d]:s[%4d]----------------------\n", set->index,
 		   num_items);
 	for (i = 0; i < num_items; ++i) {
 		printf("[%4d]:", i);
-		cc_grammar_item_print(ptrq_peek_entry(q, i));
+		cc_grammar_item_print(valq_peek_entry(q, i));
 	}
 
 	printf("item-set[%4d]:done-------------------------\n", set->index);
@@ -583,8 +648,9 @@ err_t compiler_run_scanning(struct compiler *this,
 							struct cc_token *token)
 {
 	int num_items_added, num_items, num_rhs, i;
-	struct cc_grammar_item *ti;
+	struct cc_grammar_item ti;
 	struct cc_grammar_item_set ts;
+	const struct cc_grammar_item_base *base;
 	const struct cc_grammar_item *item;
 	const struct cc_grammar_element *ge;
 	const struct cc_grammar_rule *gr;
@@ -602,11 +668,12 @@ err_t compiler_run_scanning(struct compiler *this,
 	 * token, and add that item with dot-pos moved.
 	 */
 	num_items_added = 0;
-	num_items = ptrq_num_entries(&set->shift_items);
+	num_items = valq_num_entries(&set->shift_items);
 	for (i = 0; i < num_items; ++i) {
-		item = ptrq_peek_entry(&set->shift_items, i);
-		ge = item->element;
-		gr = valq_peek_entry(&ge->rules, item->rule);
+		item = valq_peek_entry(&set->shift_items, i);
+		base = item->base;
+		ge = base->element;
+		gr = valq_peek_entry(&ge->rules, base->rule);
 		num_rhs = valq_num_entries(&gr->elements);
 		assert(item->dot_position < num_rhs);	/* bcoz shift-item */
 		ptype = valq_peek_entry(&gr->elements, item->dot_position);
@@ -614,13 +681,9 @@ err_t compiler_run_scanning(struct compiler *this,
 		type = *ptype;
 		if (type != token->type)
 			continue;
-		ti = malloc(sizeof(*ti));
-		if (ti == NULL)
-			return ENOMEM;
-		*ti = *item;
-		ti->back = NULL;	/* dot is after a terminal. */
-		++ti->dot_position;
-		err = cc_grammar_item_set_add_item(&ts, ti);
+		ti = *item;
+		++ti.dot_position;
+		err = cc_grammar_item_set_add_item(&ts, &ti);
 		if (!err)
 			++num_items_added;
 		if (err && err != EEXIST)
@@ -635,7 +698,9 @@ err_t compiler_run_completion(const struct compiler *this,
 							  struct cc_grammar_item_set *set)
 {
 	int num_items_added, num_items[2], num_rhs, index, i, j, num_rules;
-	struct cc_grammar_item *ti;
+	struct cc_grammar_item ti;
+	struct cc_grammar_derivation td;
+	const struct cc_grammar_item_base *bases[3];
 	const struct cc_grammar_item *items[3];
 	const struct cc_grammar_item_set *sets[3];
 	const struct cc_grammar_element *ge;
@@ -649,26 +714,28 @@ err_t compiler_run_completion(const struct compiler *this,
 	num_items_added = 0;
 	do {
 		set_changed = false;
-		num_items[0] = ptrq_num_entries(&sets[0]->reduce_items);
+		num_items[0] = valq_num_entries(&sets[0]->reduce_items);
 		for (i = 0; i < num_items[0]; ++i) {
-			items[0] = ptrq_peek_entry(&sets[0]->reduce_items, i);
-			sets[1] = valq_peek_entry(&this->item_sets, items[0]->origin);
+			items[0] = valq_peek_entry(&sets[0]->reduce_items, i);
+			bases[0] = items[0]->base;
+			sets[1] = valq_peek_entry(&this->item_sets, bases[0]->origin);
 			assert(sets[1]);
-			assert(sets[1]->index == items[0]->origin);
+			assert(sets[1]->index == bases[0]->origin);
 			/*
-			 * Find all items in origin set gis that contains a dot in front of
-			 * the items[0]->element. If found, add that item to set with dot
+			 * Find all items in origin set that contains a dot in front of
+			 * the bases[0]->element. If found, add that item to set with dot
 			 * moved one step.
 			 */
-			num_items[1] = ptrq_num_entries(&sets[1]->shift_items);
+			num_items[1] = valq_num_entries(&sets[1]->shift_items);
 			for (j = 0; j < num_items[1]; ++j) {
-				items[1] = ptrq_peek_entry(&sets[1]->shift_items, j);
-				ge = items[1]->element;
+				items[1] = valq_peek_entry(&sets[1]->shift_items, j);
+				bases[1] = items[1]->base;
+				ge = bases[1]->element;
 				assert(ge);
 				num_rules = valq_num_entries(&ge->rules);
 				assert(num_rules);
-				assert(items[1]->rule < num_rules);
-				gr = valq_peek_entry(&ge->rules, items[1]->rule);
+				assert(bases[1]->rule < num_rules);
+				gr = valq_peek_entry(&ge->rules, bases[1]->rule);
 				assert(gr);
 				num_rhs = valq_num_entries(&gr->elements);
 				assert(num_rhs);
@@ -679,17 +746,20 @@ err_t compiler_run_completion(const struct compiler *this,
 					continue;
 				index = type - CC_TOKEN_TRANSLATION_OBJECT;
 				ge = valq_peek_entry(&this->elements, index);
-				if (ge != items[0]->element)
+				if (ge != bases[0]->element)
 					continue;
-				ti = malloc(sizeof(*ti));
-				if (ti == NULL)
-					return ENOMEM;
-				*ti = *items[1];
-				++ti->dot_position;
-				ti->back = items[0];
-				ti->back_item_set = sets[0]->index;
-				ti->back_item = i;
-				err = cc_grammar_item_set_add_item(set, ti);
+				ti = *items[1];
+				++ti.dot_position;
+				/*
+				 * items[0] is responsible for moving the dot across
+				 * items[1].element
+				 */
+				td.item_set = sets[0]->index;
+				td.item = i;
+				err = valq_add_tail(&ti.base->back, &td);
+				if (err)
+					return err;
+				err = cc_grammar_item_set_add_item(set, &ti);
 				if (!err) {
 					++num_items_added;
 					set_changed = true;
@@ -705,32 +775,40 @@ err_t compiler_run_completion(const struct compiler *this,
 }
 
 static
-err_t compiler_run_prediction(const struct compiler *this,
+err_t compiler_run_prediction(struct compiler *this,
 							  struct cc_grammar_item_set *set)
 {
 	int num_items_added, num_items, num_rhs, index, i, j, num_rules;
-	struct cc_grammar_item *ti;
+	const struct cc_grammar_item_base *base;
 	const struct cc_grammar_item *item;
-	const struct cc_grammar_element *ge;
+	struct cc_grammar_element *ge;
 	const struct cc_grammar_rule *gr;
 	const enum cc_token_type *ptype;
 	enum cc_token_type type;
+	struct cc_grammar_item_base *tb;
+	struct cc_grammar_item ti;
 	err_t err;
 	bool set_changed;
 
 	num_items_added = 0;
 	do {
 		set_changed = false;
-		num_items = ptrq_num_entries(&set->shift_items);
+		num_items = valq_num_entries(&set->shift_items);
 		for (i = 0; i < num_items; ++i) {
-			item = ptrq_peek_entry(&set->shift_items, i);
-			ge = item->element;
-			gr = valq_peek_entry(&ge->rules, item->rule);
+			item = valq_peek_entry(&set->shift_items, i);
+			base = item->base;
+			assert(base);
+			ge = base->element;
+			assert(ge);
+			num_rules = valq_num_entries(&ge->rules);
+			assert(base->rule < num_rules);
+			gr = valq_peek_entry(&ge->rules, base->rule);
 			num_rhs = valq_num_entries(&gr->elements);
 			assert(item->dot_position < num_rhs);	/* bcoz shift-item */
 			ptype = valq_peek_entry(&gr->elements, item->dot_position);
 			assert(ptype);
 			type = *ptype;
+			/* Prediction applicable only to non-terminals */
 			if (!cc_token_type_is_non_terminal(type))
 				continue;
 			index = type - CC_TOKEN_TRANSLATION_OBJECT;
@@ -738,13 +816,18 @@ err_t compiler_run_prediction(const struct compiler *this,
 			assert(ge->type == type);
 			num_rules = valq_num_entries(&ge->rules);
 			for (j = 0; j < num_rules; ++j) {
-				ti = calloc(1, sizeof(*ti));
-				if (ti == NULL)
+				tb = malloc(sizeof(*tb));
+				if (tb == NULL)
 					return ENOMEM;
-				ti->element = ge;
-				ti->rule = j;
-				ti->origin = set->index;
-				err = cc_grammar_item_set_add_item(set, ti);
+				ti.dot_position = 0;
+				cc_grammar_item_base_init(tb, ge, j, set->index);
+				err = cc_grammar_element_add_base_item(ge, tb, &ti.base);
+				if (err)
+					return err;
+				assert(ti.base->element == ge);
+				assert(ti.base->rule == j);
+				assert(ti.base->origin == set->index);
+				err = cc_grammar_item_set_add_item(set, &ti);
 				if (!err) {
 					++num_items_added;
 					set_changed = true;
@@ -811,20 +894,31 @@ err_t compiler_parse(struct compiler *this)
 err_t compiler_compile(struct compiler *this)
 {
 	err_t err;
-	struct cc_grammar_item *item;
+	struct cc_grammar_element *element;
+	struct cc_grammar_item item;
+	struct cc_grammar_item_base *tb;
 	struct cc_grammar_item_set set;
 
 	/* Prepare the item-set-#0 */
-	item = calloc(1, sizeof(*item));
-	if (item == NULL)
+	tb = malloc(sizeof(*tb));
+	if (tb == NULL)
 		return ENOMEM;
+	element = valq_peek_entry(&this->elements, 0);
+	assert(element->type == CC_TOKEN_TRANSLATION_OBJECT);
+	cc_grammar_item_base_init(tb, element, 0, 0);
+	err = cc_grammar_element_add_base_item(element, tb, &item.base);
+	if (err)
+		return err;
+	item.dot_position = 0;
+
 	cc_grammar_item_set_init(&set, 0);
-	item->element = valq_peek_entry(&this->elements, 0);
-	err = cc_grammar_item_set_add_item(&set, item);
+	err = cc_grammar_item_set_add_item(&set, &item);
 	assert(err != EEXIST);
 	if (!err)
 		err = valq_add_tail(&this->item_sets, &set);
 	if (err)
 		return err;
-	return compiler_parse(this);
+	err = compiler_parse(this);
+	printf("max_num_base_items = %d\n", max_num_base_items);
+	return err;
 }
