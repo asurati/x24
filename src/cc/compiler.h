@@ -268,6 +268,7 @@ struct cc_parse_stack_entry {
 struct compiler {
 	struct val_queue	elements;	/* Only non-terminals */
 	struct val_queue	item_sets;
+	struct cc_parse_node	*root;
 
 	int	cpp_tokens_fd;
 	const char	*cpp_tokens_path;

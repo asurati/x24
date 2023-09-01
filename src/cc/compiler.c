@@ -86,7 +86,10 @@ void cc_grammar_item_set_delete(void *p)
 void cc_parse_node_delete(void *p)
 {
 	struct cc_parse_node *this = p;
-	cc_token_delete(this->token);
+	if (!cc_token_type_is_non_terminal(this->type)) {
+		assert(this->token);
+		cc_token_delete(this->token);
+	}
 	ptrq_empty(&this->child_nodes);
 	free(this);
 }
@@ -223,7 +226,8 @@ err0:
 	return err;
 }
 
-err_t compiler_delete(struct compiler *this)
+static
+void compiler_cleanup0(struct compiler *this)
 {
 	assert(this);
 	munmap((void *)this->stream.buffer, this->stream.buffer_size);
@@ -231,9 +235,14 @@ err_t compiler_delete(struct compiler *this)
 	unlink(this->cpp_tokens_path);
 	free((void *)this->cpp_tokens_path);
 	cc_token_stream_empty(&this->stream);
-
 	valq_empty(&this->elements);
 	valq_empty(&this->item_sets);
+}
+
+err_t compiler_delete(struct compiler *this)
+{
+	assert(this);
+	cc_parse_node_delete(this->root);
 	free(this);
 	return ESUCCESS;
 }
@@ -981,21 +990,19 @@ err_t compiler_build_tree(struct compiler *this)
 			ptype = valq_peek_entry(&gr->elements, i);
 			child = malloc(sizeof(*child));
 			child->type = *ptype;
-			child->token = NULL;	/* TODO */
 			ptrq_init(&child->child_nodes, cc_parse_node_delete);
 			err = ptrq_add_tail(&node->child_nodes, child);
 			if (err)
 				return err;
 
 			bi = valq_peek_head(&back_infos);
+			child->token = bi->token;
 			entry.back_item_set = bi->item_set;
 			entry.back_item = bi->item;
 			entry.node = child;
 			valq_remove_head(&back_infos);
 			if (!cc_token_type_is_non_terminal(child->type)) {
-				assert(bi->token);
-				assert(bi->item == EOF);
-				child->token = bi->token;
+				assert(child->token);
 				continue;	/* termianls need not be added on stack */
 			}
 			err = valq_add_tail(&stack, &entry);
@@ -1003,6 +1010,7 @@ err_t compiler_build_tree(struct compiler *this)
 				return err;
 		}
 	}
+	this->root = root;
 	return ESUCCESS;
 }
 /*****************************************************************************/
@@ -1026,5 +1034,7 @@ err_t compiler_compile(struct compiler *this)
 		err = compiler_parse(this);
 	if (!err)
 		err = compiler_build_tree(this);
+	if (!err)
+		compiler_cleanup0(this);
 	return err;
 }
