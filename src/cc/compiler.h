@@ -172,6 +172,11 @@ struct cc_grammar_element {
 	struct val_queue	rules;
 };
 
+struct cc_grammar_back_info {
+	int	item_set;
+	int	item;
+};
+
 #if 0
 /*
  * element, rule, origin uniqueuely identifies an item.
@@ -251,6 +256,11 @@ struct cc_parse_node {
 	enum cc_token_type	type;
 	struct cc_token		*token;
 	struct ptr_queue	child_nodes;	/* each q-entry is a cc_parse_node* */
+};
+
+struct cc_parse_stack_entry {
+	struct cc_parse_node *node;
+	struct cc_grammar_back_info	back_info;
 };
 /*****************************************************************************/
 struct compiler {
