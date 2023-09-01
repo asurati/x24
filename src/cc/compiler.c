@@ -1014,6 +1014,31 @@ err_t compiler_build_tree(struct compiler *this)
 	return ESUCCESS;
 }
 /*****************************************************************************/
+static
+void cc_parse_node_print(const struct cc_parse_node *this)
+{
+	int i;
+	const struct cc_parse_node *child;
+
+	printf("\n(");
+	if (!cc_token_type_is_non_terminal(this->type)) {
+		assert(this->token);
+		assert(this->token->string);
+		printf("%s", this->token->string);
+	} else {
+		printf("%s", &g_cc_token_type_str[this->type][strlen("CC_TOKEN_")]);
+	}
+	PTRQ_FOR_EACH(&this->child_nodes, i, child)
+		cc_parse_node_print(child);
+	printf(")\n");
+}
+
+static
+void compiler_print_tree(const struct compiler *this)
+{
+	cc_parse_node_print(this->root);
+}
+/*****************************************************************************/
 err_t compiler_compile(struct compiler *this)
 {
 	err_t err;
@@ -1036,5 +1061,7 @@ err_t compiler_compile(struct compiler *this)
 		err = compiler_build_tree(this);
 	if (!err)
 		compiler_cleanup0(this);
+	if (!err)
+		compiler_print_tree(this);
 	return err;
 }
