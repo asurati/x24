@@ -22,3 +22,8 @@ the parse tree in the form of LISP-like lists.
   required. Of course, if the preprocessor is not subjected to scanning the
   libc headers, it doesn't need to define such macros. Nevertheless, these
   headers provide a good test-case for testing the preprocessor.
+
+- It relies on the Earley recognizer to generate the item-sets. For the items
+  that get added into the item-set because of another reduce-item, it maintains
+  a back-edge towards the reduce-item. Once the item-sets are generated,
+  it backtracks over them, using the back-edges, to build the parse-tree.
