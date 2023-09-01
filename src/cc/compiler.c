@@ -812,6 +812,7 @@ err_t compiler_parse(struct compiler *this)
 /*****************************************************************************/
 static
 err_t compiler_calc_back_info(const struct compiler *this,
+							  struct cc_grammar_item_set *set,
 							  const struct cc_grammar_item *item,
 							  struct val_queue *back_infos)
 {
@@ -821,11 +822,11 @@ err_t compiler_calc_back_info(const struct compiler *this,
 	const struct cc_grammar_element *ge;
 	const struct cc_grammar_rule *gr;
 	const struct cc_grammar_item *curr;
-	struct cc_grammar_item *ti;
-	const struct cc_grammar_item_set *set;
 	const enum cc_token_type *ptype;
 	enum cc_token_type type;
 
+	printf("%s:", __func__);
+	cc_grammar_item_print(item);
 	/*
 	 * The curr is an item of the type A -> B C(x,y) . D, where C is a
 	 * non-terminal.
@@ -844,12 +845,20 @@ err_t compiler_calc_back_info(const struct compiler *this,
 		ptype = valq_peek_entry(&gr->elements, dot_position);
 		assert(ptype);
 		type = *ptype;
-		assert(cc_token_type_is_non_terminal(type));	/* for now */
-
-		/* non-terminal left of dot. Hence back must be valid */
-		assert(curr->back);
-		bi.item_set = curr->back_item_set;
-		bi.item = curr->back_item;
+		bi.token = NULL;
+		if (!cc_token_type_is_non_terminal(type)) {
+			assert(set->token);
+			assert(set->token->type == type);
+			bi.token = set->token;
+			set->token = NULL;
+			bi.item_set = set->index - 1;
+			bi.item = EOF;
+		} else {
+			/* non-terminal left of dot. Hence back must be valid */
+			assert(curr->back);
+			bi.item_set = curr->back_item_set;
+			bi.item = curr->back_item;
+		}
 		err = valq_add_head(back_infos, &bi);
 		if (err)
 			return err;
@@ -861,30 +870,35 @@ err_t compiler_calc_back_info(const struct compiler *this,
 		 * Find the left-dot-neighbour. In the origin of the back-item,
 		 * there should be an item of type A -> B(x,y) . C D (k)
 		 */
-		set = valq_peek_entry(&this->item_sets, curr->back_item_set);
-		item = ptrq_peek_entry(&set->reduce_items, curr->back_item);
-		assert(item);
-		origin = item->origin;
+		if (!cc_token_type_is_non_terminal(type)) {
+			/* bi.item_set must have an item */
+			origin = bi.item_set;
+			set = valq_peek_entry(&this->item_sets, bi.item_set);
+		} else {
+			set = valq_peek_entry(&this->item_sets, curr->back_item_set);
+			item = ptrq_peek_entry(&set->reduce_items, curr->back_item);
+			assert(item);
+			origin = item->origin;
+		}
 
 		/*
-		 * Find the item in origin of the same type as curr, but with dot-pos
-		 * shifted to left. The item must be in shift-items
+		 * Find the item in origin of the same type as curr, but with
+		 * dot-pos shifted to left. The item must be in shift-items
 		 */
 		set = valq_peek_entry(&this->item_sets, origin);
-		curr = NULL;
-		PTRQ_FOR_EACH(&set->shift_items, i, ti) {
-			if (ti->element != curr->element)
+		PTRQ_FOR_EACH(&set->shift_items, i, item) {
+			if (item->element != curr->element)
 				continue;
-			if (ti->rule != curr->rule)
+			if (item->rule != curr->rule)
 				continue;
-			if (ti->origin != curr->origin)
+			if (item->origin != curr->origin)
 				continue;
-			if (ti->dot_position != dot_position)
+			if (item->dot_position != dot_position)
 				continue;
-			curr = ti;
 			break;
 		}
-		assert(curr);
+		assert(item);
+		curr = item;
 	}
 	assert(valq_num_entries(back_infos));
 	return ESUCCESS;
@@ -898,7 +912,7 @@ err_t compiler_build_tree(struct compiler *this)
 	const struct cc_grammar_element *ge;
 	const struct cc_grammar_rule *gr;
 	const struct cc_grammar_item *item;
-	const struct cc_grammar_item_set *set;
+	struct cc_grammar_item_set *set;
 	const struct cc_grammar_back_info *bi;
 	struct cc_parse_node *root, *node, *child;
 	struct val_queue stack;
@@ -921,7 +935,7 @@ err_t compiler_build_tree(struct compiler *this)
 	valq_init(&stack, sizeof(entry), NULL);
 	valq_init(&back_infos, sizeof(*bi), NULL);
 
-	err = compiler_calc_back_info(this, item, &back_infos);
+	err = compiler_calc_back_info(this, set, item, &back_infos);
 	if (err)
 		return err;
 	assert(valq_num_entries(&back_infos));
@@ -942,7 +956,8 @@ err_t compiler_build_tree(struct compiler *this)
 	assert(valq_num_entries(&back_infos) == 1);
 	bi = valq_peek_entry(&back_infos, 0);
 	entry.node = node;
-	entry.back_info = *bi;
+	entry.back_item_set = bi->item_set;
+	entry.back_item = bi->item;
 	valq_remove_entry(&back_infos, 0);
 	err = valq_add_tail(&stack, &entry);
 	if (err)
@@ -952,17 +967,16 @@ err_t compiler_build_tree(struct compiler *this)
 		entry = *(struct cc_parse_stack_entry *)valq_peek_tail(&stack);
 		valq_remove_tail(&stack);
 		node = entry.node;
-		bi = &entry.back_info;
-		set = valq_peek_entry(&this->item_sets, bi->item_set);
-		item = ptrq_peek_entry(&set->reduce_items, bi->item);
-		err = compiler_calc_back_info(this, item, &back_infos);
-		if (err)
-			return err;
-		/* Add nodes for each element on the rhs */
+		set = valq_peek_entry(&this->item_sets, entry.back_item_set);
+		item = ptrq_peek_entry(&set->reduce_items, entry.back_item);
 		ge = item->element;
 		gr = valq_peek_entry(&ge->rules, item->rule);
 		num_rhs = valq_num_entries(&gr->elements);
+		err = compiler_calc_back_info(this, set, item, &back_infos);
+		if (err)
+			return err;
 		assert(valq_num_entries(&back_infos) == num_rhs);
+		/* Add nodes for each element on the rhs */
 		for (i = 0; i < num_rhs; ++i) {
 			ptype = valq_peek_entry(&gr->elements, i);
 			child = malloc(sizeof(*child));
@@ -972,9 +986,18 @@ err_t compiler_build_tree(struct compiler *this)
 			err = ptrq_add_tail(&node->child_nodes, child);
 			if (err)
 				return err;
+
+			bi = valq_peek_head(&back_infos);
+			entry.back_item_set = bi->item_set;
+			entry.back_item = bi->item;
 			entry.node = child;
-			bi = valq_peek_entry(&back_infos, i);
-			entry.back_info = *bi;
+			valq_remove_head(&back_infos);
+			if (!cc_token_type_is_non_terminal(child->type)) {
+				assert(bi->token);
+				assert(bi->item == EOF);
+				child->token = bi->token;
+				continue;	/* termianls need not be added on stack */
+			}
 			err = valq_add_tail(&stack, &entry);
 			if (err)
 				return err;

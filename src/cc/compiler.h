@@ -173,6 +173,7 @@ struct cc_grammar_element {
 };
 
 struct cc_grammar_back_info {
+	struct cc_token *token;
 	int	item_set;
 	int	item;
 };
@@ -260,7 +261,8 @@ struct cc_parse_node {
 
 struct cc_parse_stack_entry {
 	struct cc_parse_node *node;
-	struct cc_grammar_back_info	back_info;
+	int	back_item_set;
+	int	back_item;
 };
 /*****************************************************************************/
 struct compiler {
