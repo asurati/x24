@@ -778,8 +778,22 @@ err_t compiler_parse(struct compiler *this)
 	err_t err;
 	struct cc_grammar_item_set *set;
 	struct cc_token *token;
+	struct cc_grammar_item *item;
+	struct cc_grammar_item_set ts;
 
-	err = EINVAL;
+	/* Prepare the item-set-#0 */
+	item = calloc(1, sizeof(*item));
+	if (item == NULL)
+		return ENOMEM;
+	cc_grammar_item_set_init(&ts, 0);
+	item->element = valq_peek_entry(&this->elements, 0);
+	err = cc_grammar_item_set_add_item(&ts, item);
+	assert(err != EEXIST);
+	if (!err)
+		err = valq_add_tail(&this->item_sets, &ts);
+	if (err)
+		return err;
+
 	index = 0;
 	token = NULL;
 	while (true) {
@@ -1042,21 +1056,7 @@ void compiler_print_tree(const struct compiler *this)
 err_t compiler_compile(struct compiler *this)
 {
 	err_t err;
-	struct cc_grammar_item *item;
-	struct cc_grammar_item_set set;
-
-	/* Prepare the item-set-#0 */
-	item = calloc(1, sizeof(*item));
-	if (item == NULL)
-		return ENOMEM;
-	cc_grammar_item_set_init(&set, 0);
-	item->element = valq_peek_entry(&this->elements, 0);
-	err = cc_grammar_item_set_add_item(&set, item);
-	assert(err != EEXIST);
-	if (!err)
-		err = valq_add_tail(&this->item_sets, &set);
-	if (!err)
-		err = compiler_parse(this);
+	err = compiler_parse(this);
 	if (!err)
 		err = compiler_build_tree(this);
 	if (!err)
