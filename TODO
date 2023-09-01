@@ -6,4 +6,4 @@
 - Suppose '#define str(s) #s'. Then str(\n) should not duplicate the
   back-slash.
 - Support __has_include, __has_embed __has_c_attribute.
-- Convert cpp_tokens into cc_tokens, and begin parsing the C grammar.
+- Translate char-consts and string-literals to exec-char-format.

@@ -1,5 +1,5 @@
 # x24
-This program, number x24, is a C Preprocessor, implemented in C.
+This program, x24, aims to be a C compiler. It is implemented in C.
 
 ### License
 It is distributed under the
@@ -8,8 +8,11 @@ It is distributed under the
 ### Features
 x24 is a work-in-progress. It aims to conform to the C2x standard.
 
-At present, it is able to scan those libc and system headers that it itself
+Its preprocessor is able to scan those libc and system headers that it itself
 includes in its source, and the headers that are included recursively by them.
+
+It builds a parse tree out of the tokens, to fit the C grammar. It then prints
+the parse tree in the form of LISP-like lists.
 
 ### Notes
 - A non-standard macro, `#define __x86_64__ 1`, was required as one of the
