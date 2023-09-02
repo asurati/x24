@@ -332,11 +332,17 @@ digits:
 		goto exponent;
 	}
 
-	/* float-suffix without exp */
-	if (str[i] == 'd' || str[i] == 'f' || str[i] == 'l' ||
-		str[i] == 'D' || str[i] == 'F' || str[i] == 'L')
+	/* float-suffix without exp. dot-seen must be true. */
+	if (dot_seen &&
+		(str[i] == 'd' || str[i] == 'f' || str[i] == 'l' ||
+		 str[i] == 'D' || str[i] == 'F' || str[i] == 'L'))
 		goto floating_suffix;
 
+	/* integer-suffix. dot-seen must be false. */
+	if (!dot_seen &&
+		(str[i] == 'u' || str[i] == 'U' || str[i] == 'l' || str[i] == 'L' ||
+		 str[i] == 'w' || str[i] == 'W'))
+		goto integer_suffix;
 	return EINVAL;
 exponent:
 	this->type = CC_TOKEN_FLOATING_CONST;
@@ -360,7 +366,8 @@ exponent:
 floating_suffix:
 	this->type = CC_TOKEN_FLOATING_CONST;
 	if (i == str_len)
-		return ESUCCESS;
+		goto done;
+		/*return ESUCCESS;*/
 	if (str[i] == 'f' || str[i] == 'F' ||
 		str[i] == 'l' || str[i] == 'L') {
 		++i;
@@ -377,6 +384,75 @@ floating_suffix:
 		++i;
 		goto done;
 	}
+	return EINVAL;
+integer_suffix:
+	if (str[i] == 'u' || str[i] == 'U')
+		goto unsigned_suffix_begin;
+	if (str[i] == 'l' || str[i] == 'L')
+		goto long_suffix_begin;
+	if (str[i] == 'w' || str[i] == 'W')
+		goto bit_precise_int_suffix_begin;
+	return EINVAL;
+unsigned_suffix_begin:
+	/* Consume u/U, check for the those that can follow */
+	if (++i == str_len)
+		goto done;
+	if (str[i] == 'l' || str[i] == 'L')
+		goto long_suffix_end;
+	if (str[i] == 'w' || str[i] == 'W')
+		goto bit_precise_int_suffix_end;
+	return EINVAL;
+long_suffix_begin:
+	if (++i == str_len)
+		goto done;
+	if (str[i - 1] == 'l' && str[i] == 'l')
+		++i;
+	else if (str[i - 1] == 'L' && str[i] == 'L')
+		++i;
+	if (i == str_len)
+		goto done;
+	if (str[i] == 'u' || str[i] == 'U')
+		goto unsigned_suffix_end;
+	if (str[i] == 'w' || str[i] == 'W')
+		goto bit_precise_int_suffix_end;
+	return EINVAL;
+bit_precise_int_suffix_begin:
+	if (++i == str_len)
+		return EINVAL;
+	if (str[i - 1] == 'w' && str[i] == 'b')
+		++i;
+	else if (str[i - 1] == 'W' && str[i] == 'B')
+		++i;
+	if (i == str_len)
+		goto done;
+	if (str[i] == 'u' || str[i] == 'U')
+		goto unsigned_suffix_end;
+	if (str[i] == 'l' || str[i] == 'L')
+		goto long_suffix_end;
+	return EINVAL;
+unsigned_suffix_end:
+	if (++i == str_len)
+		goto done;
+	return EINVAL;
+long_suffix_end:
+	if (++i == str_len)
+		goto done;
+	if (str[i - 1] == 'l' && str[i] == 'l')
+		++i;
+	else if (str[i - 1] == 'L' && str[i] == 'L')
+		++i;
+	if (i == str_len)
+		goto done;
+	return EINVAL;
+bit_precise_int_suffix_end:
+	if (++i == str_len)
+		return EINVAL;
+	if (str[i - 1] == 'w' && str[i] == 'b')
+		++i;
+	else if (str[i - 1] == 'W' && str[i] == 'B')
+		++i;
+	if (i == str_len)
+		goto done;
 	return EINVAL;
 done:
 	if (i != str_len || was_prev_separator)
@@ -1063,5 +1139,6 @@ err_t compiler_compile(struct compiler *this)
 		compiler_cleanup0(this);
 	if (!err)
 		compiler_print_tree(this);
+	assert(!err);
 	return err;
 }
