@@ -3202,16 +3202,33 @@ err_t scanner_serialize_cpp_token(struct scanner *this,
 	const void *buf;
 	enum lexer_token_type type;
 
-	/* First write the lexer_token type */
 	type = cpp_token_type(token);
+
+	/*
+	 * A program can contain a varaible named 'line', which the scanner
+	 * identifies as LXR_TOKEN_DIRECTIVE_LINE, but for c 'line' isn't a
+	 * key-word, hence it must be converted to identifier. There may be other
+	 * such cpp-keywords that may need fixing before serializing the token.
+	 * No cpp-token-type must be passed forward to the compiler.
+	 *
+	 * For e.g. int elifdef = 0; is valid c code. The assert prevents moving
+	 * forward, for now. Must fix.
+	 *
+	 * TODO.
+	 */
+	if (type == LXR_TOKEN_DIRECTIVE_LINE)
+		type = LXR_TOKEN_IDENTIFIER;
+	assert(type < LXR_TOKEN_DATE || type > LXR_TOKEN_UNARY_MINUS);
+
+	/* First write the lexer_token type */
 	buf = &type;
 	size = sizeof(type);
 	ret = write(this->cpp_tokens_fd, buf, size);
 	if (ret < 0)
 		return errno;
 
-	/* Write nothing more for keywords and punctuators */
-	if (cpp_token_is_key_word(token) ||
+	/* Write nothing more for c-keywords and punctuators */
+	if (cpp_token_is_c_key_word(token) ||
 		cpp_token_is_punctuator(token))
 		return ESUCCESS;
 
@@ -3428,6 +3445,10 @@ err_t scanner_scan_predefined_macros(struct scanner *this)
 		"#define __STDC_NO_COMPLEX__ 1\n"
 		"#define __STDC_NO_THREADS__ 1\n"
 		"#define __STDC_NO_VLA__ 1\n"
+
+		/* These are temp. hacks to proceed with the compiler */
+		"#define __FILE__ \"unsup\"\n"
+		"#define __LINE__ 0\n"
 
 		/*
 		 * glibc's stdc-predef.h already defines __STDC_ISO_10646__ to

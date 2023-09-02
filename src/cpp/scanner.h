@@ -73,6 +73,12 @@ bool cpp_token_is_key_word(const struct cpp_token *this)
 }
 
 static inline
+bool cpp_token_is_c_key_word(const struct cpp_token *this)
+{
+	return lexer_token_is_c_key_word(this->base);
+}
+
+static inline
 bool cpp_token_is_punctuator(const struct cpp_token *this)
 {
 	return lexer_token_is_punctuator(this->base);

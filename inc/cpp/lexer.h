@@ -146,6 +146,14 @@ bool lexer_token_is_key_word(const struct lexer_token *this)
 }
 
 static inline
+bool lexer_token_is_c_key_word(const struct lexer_token *this)
+{
+	enum lexer_token_type type = lexer_token_type(this);
+	return (type >= LXR_TOKEN_ATOMIC &&
+			type <= LXR_TOKEN_WHILE);
+}
+
+static inline
 bool lexer_token_is_punctuator(const struct lexer_token *this)
 {
 	enum lexer_token_type type = lexer_token_type(this);
