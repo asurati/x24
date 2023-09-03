@@ -3445,11 +3445,6 @@ err_t scanner_scan_predefined_macros(struct scanner *this)
 		"#define __STDC_NO_COMPLEX__ 1\n"
 		"#define __STDC_NO_THREADS__ 1\n"
 		"#define __STDC_NO_VLA__ 1\n"
-
-		/* These are temp. hacks to proceed with the compiler */
-		"#define __FILE__ \"unsup\"\n"
-		"#define __LINE__ 0\n"
-
 		/*
 		 * glibc's stdc-predef.h already defines __STDC_ISO_10646__ to
 		 * 201706L. Inserting the below definition results in violation of
@@ -3459,8 +3454,24 @@ err_t scanner_scan_predefined_macros(struct scanner *this)
 #if 0
 		"#define __STDC_ISO_10646__ 202012L\n"
 #endif
-		/* These declarations to allow parsing GNU headers. */
-		"#define __x86_64__ 1\n";
+		/*
+		 * These are temp. hacks to proceed with the compiler. The function
+		 * scanner_process_one can deal with these two macros; the scanner must
+		 * maintain the name of the file in which it currently is scanning;
+		 * the __LINE__ token itself has the info about the position within the
+		 * file.
+		 */
+		"#define __FILE__ \"unsup\"\n"
+		"#define __LINE__ 0\n"
+
+		/*
+		 * These declarations to allow parsing glibc headers.
+		 * __x86_64__ helps avoid including gnu/stubs-32.h.
+		 * __STRICT_ANSI__ helps avoid bringing in glibc functions that gcc
+		 * avoids when compiling under an ISO std (for e.g. -std=c2x).
+		 */
+		"#define __x86_64__ 1\n"
+		"#define __STRICT_ANSI__ 1\n";
 
 	err = mkstemp(&fd, &path);
 	if (err)
