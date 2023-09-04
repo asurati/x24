@@ -259,6 +259,97 @@ struct cc_parse_node {
 	struct ptr_queue	child_nodes;	/* each q-entry is a cc_parse_node* */
 };
 
+extern void cc_parse_node_delete(void *p);
+
+static inline
+void cc_parse_node_init(struct cc_parse_node *this,
+						const enum cc_token_type type,
+						struct cc_token *token)
+{
+	this->type = type;
+	this->token = token;
+	ptrq_init(&this->child_nodes, cc_parse_node_delete);
+}
+
+static inline
+enum cc_token_type cc_parse_node_type(const struct cc_parse_node *this)
+{
+	return this->type;
+}
+
+static inline
+int cc_parse_node_num_children(const struct cc_parse_node *this)
+{
+	return ptrq_num_entries(&this->child_nodes);
+}
+
+static inline
+err_t cc_parse_node_add_head_child(struct cc_parse_node *this,
+								   struct cc_parse_node *child)
+{
+	return ptrq_add_head(&this->child_nodes, child);
+}
+
+static inline
+err_t cc_parse_node_add_tail_child(struct cc_parse_node *this,
+								   struct cc_parse_node *child)
+{
+	return ptrq_add_tail(&this->child_nodes, child);
+}
+
+static inline
+struct cc_parse_node *
+cc_parse_node_peek_child_node(const struct cc_parse_node *this,
+							  const int index)
+{
+	return ptrq_peek_entry(&this->child_nodes, index);
+}
+
+static inline
+struct cc_parse_node *
+cc_parse_node_peek_head_child(const struct cc_parse_node *this)
+{
+	return cc_parse_node_peek_child_node(this, 0);
+}
+
+static inline
+struct cc_parse_node *
+cc_parse_node_peek_tail_child(const struct cc_parse_node *this)
+{
+	int num_children = cc_parse_node_num_children(this);
+	return cc_parse_node_peek_child_node(this, num_children - 1);
+}
+
+static inline
+struct cc_parse_node *
+cc_parse_node_remove_child_node(struct cc_parse_node *this,
+								const int index)
+{
+	return ptrq_remove_entry(&this->child_nodes, index);
+}
+
+static inline
+struct cc_parse_node *
+cc_parse_node_remove_head_child(struct cc_parse_node *this)
+{
+	return cc_parse_node_remove_child_node(this, 0);
+}
+
+static inline
+struct cc_parse_node *
+cc_parse_node_remove_tail_child(struct cc_parse_node *this)
+{
+	int num_children = cc_parse_node_num_children(this);
+	return cc_parse_node_remove_child_node(this, num_children - 1);
+}
+
+static inline
+err_t cc_parse_node_move_children(struct cc_parse_node *this,
+								  struct cc_parse_node *to)
+{
+	return ptrq_move(&this->child_nodes, &to->child_nodes);
+}
+/*****************************************************************************/
 struct cc_parse_stack_entry {
 	struct cc_parse_node *node;
 	int	back_item_set;

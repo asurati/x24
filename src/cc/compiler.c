@@ -21,6 +21,10 @@
 extern const char *g_key_words[];
 extern const char *g_punctuators[];
 /*****************************************************************************/
+static
+err_t cc_parse_node_visit(struct cc_parse_node *this,
+						  struct cc_parse_node *out);	/* parent ast node */
+/*****************************************************************************/
 static const char *g_cc_token_type_str[] = {
 #define DEF(t)	"CC_TOKEN_" # t,
 #include <inc/cpp/tokens.h>
@@ -83,12 +87,16 @@ void cc_grammar_item_set_delete(void *p)
 		cc_token_delete(this->token);
 }
 
+/* Building ast out of parse-tree will nullify certain token ptrs. TODO */
 void cc_parse_node_delete(void *p)
 {
 	struct cc_parse_node *this = p;
 	if (!cc_token_type_is_non_terminal(this->type)) {
-		assert(this->token);
-		cc_token_delete(this->token);
+		/* The token may have been reassigned to an ast-node. */
+		if (this->token)
+			cc_token_delete(this->token);
+	} else {
+		assert(this->token == NULL);
 	}
 	ptrq_empty(&this->child_nodes);
 	free(this);
@@ -1124,9 +1132,170 @@ void cc_parse_node_print(const struct cc_parse_node *this)
 }
 
 static
-void compiler_print_tree(const struct compiler *this)
+void compiler_print_parse_tree(const struct compiler *this)
 {
 	cc_parse_node_print(this->root);
+}
+/*****************************************************************************/
+static
+err_t cc_parse_node_visit_translation_object(struct cc_parse_node *this,
+											 struct cc_parse_node *out)
+{
+	struct cc_parse_node *child;
+	assert(cc_parse_node_type(out) == CC_TOKEN_TRANSLATION_UNIT);
+	child = cc_parse_node_remove_head_child(this);
+	cc_parse_node_delete(this);
+	return cc_parse_node_visit(child, out);
+}
+
+static
+err_t cc_parse_node_visit_translation_unit(struct cc_parse_node *this,
+										   struct cc_parse_node *out)
+{
+	err_t err;
+	struct cc_parse_node *child;
+
+	/*
+	 * CC_TOKEN_TRANSLATION_UNIT is left-associative.
+	 * Visit in left-right-root order.
+	 */
+	assert(cc_parse_node_type(out) == CC_TOKEN_TRANSLATION_UNIT);
+	child = cc_parse_node_remove_head_child(this);
+	err = cc_parse_node_visit(child, out);
+	if (err || cc_parse_node_num_children(this) == 0)
+		return err;
+	child = cc_parse_node_remove_head_child(this);
+	return cc_parse_node_visit(child, out);
+}
+
+static
+err_t cc_parse_node_visit_external_declaration(struct cc_parse_node *this,
+											   struct cc_parse_node *out)
+{
+	struct cc_parse_node *child;
+	assert(cc_parse_node_type(out) == CC_TOKEN_TRANSLATION_UNIT);
+	child = cc_parse_node_peek_head_child(this);
+	cc_parse_node_delete(this);
+	return cc_parse_node_visit(child, out);
+}
+
+static
+err_t cc_parse_node_visit_declaration(struct cc_parse_node *this,
+									  struct cc_parse_node *out)
+{
+	err_t err;
+	enum cc_token_type type;
+	struct cc_parse_node *child;
+
+	child = cc_parse_node_peek_head_child(this);
+	type = cc_parse_node_type(child);
+	if (type == CC_TOKEN_STATIC_ASSERT_DECLARATION ||
+		type == CC_TOKEN_ATTRIBUTE_DECLARATION) {
+		cc_parse_node_remove_head_child(this);
+		return cc_parse_node_visit(child, out);
+	}
+	assert(0);
+	return err;
+}
+
+/*
+ * StaticAssertDeclaration:
+ *	single child, the ConstantExpression.
+ *	token == string provided with the static-assert, if any.
+ */
+static
+err_t cc_parse_node_visit_static_assert_declaration(struct cc_parse_node *this,
+													struct cc_parse_node *out)
+{
+	int i;
+	err_t err;
+	struct cc_parse_node *child, *node;
+
+	/* Delete parse-nodes for static-assert and left-paren */
+	for (i = 0; i < 2; ++i) {
+		child = cc_parse_node_remove_head_child(this);
+		cc_parse_node_delete(child);
+	}
+	/* Delete parse-nodes for right-paren and semi-colon */
+	for (i = 0; i < 2; ++i) {
+		child = cc_parse_node_remove_tail_child(this);
+		cc_parse_node_delete(child);
+	}
+
+	node = malloc(sizeof(*node));
+	if (node == NULL)
+		return ENOMEM;
+	cc_parse_node_init(node, CC_TOKEN_STATIC_ASSERT_DECLARATION, NULL);
+	child = cc_parse_node_remove_head_child(this);
+	err = cc_parse_node_visit(child, node);
+	if (err)
+		return err;
+	if (cc_parse_node_num_children(this) == 0)
+		goto done;
+	child = cc_parse_node_remove_tail_child(this);
+	assert(child->token);
+	assert(cc_token_is_string_literal(child->token));
+	node->token = child->token;
+	child->token = NULL;
+done:
+	return cc_parse_node_add_tail_child(out, node);
+}
+
+/* AttributeDeclaration: list of AttributeSpecifiers. */
+static
+err_t cc_parse_node_visit_attribute_declaration(struct cc_parse_node *this,
+												struct cc_parse_node *out)
+{
+	err_t err;
+	struct cc_parse_node *child, *node;
+
+	node = malloc(sizeof(*node));
+	if (node == NULL)
+		return ENOMEM;
+	cc_parse_node_init(node, CC_TOKEN_ATTRIBUTE_DECLARATION, NULL);
+	child = cc_parse_node_remove_head_child(this);
+	err = cc_parse_node_visit(child, node);
+	if (!err)
+		err = cc_parse_node_add_tail_child(out, node);
+	return err;
+}
+
+static
+err_t cc_parse_node_visit(struct cc_parse_node *this,
+						  struct cc_parse_node *out)	/* parent ast node */
+{
+	err_t err;
+	enum cc_token_type type;
+
+	/* 'this' is a parse-tree node */
+	err = ENOTSUP;
+	type = cc_parse_node_type(this);
+	if (type == CC_TOKEN_TRANSLATION_OBJECT)
+		err = cc_parse_node_visit_translation_object(this, out);
+	if (type == CC_TOKEN_TRANSLATION_UNIT)
+		err = cc_parse_node_visit_translation_unit(this, out);
+	if (type == CC_TOKEN_EXTERNAL_DECLARATION)
+		err = cc_parse_node_visit_external_declaration(this, out);
+	if (type == CC_TOKEN_DECLARATION)
+		err = cc_parse_node_visit_declaration(this, out);
+	if (type == CC_TOKEN_STATIC_ASSERT_DECLARATION)
+		err = cc_parse_node_visit_static_assert_declaration(this, out);
+	if (type == CC_TOKEN_ATTRIBUTE_DECLARATION)
+		err = cc_parse_node_visit_attribute_declaration(this, out);
+	cc_parse_node_delete(this);
+	return err;
+}
+
+static
+err_t compiler_visit_parse_tree(struct compiler *this)
+{
+	struct cc_parse_node *root;
+
+	root = malloc(sizeof(*root));
+	if (root == NULL)
+		return ENOMEM;
+	cc_parse_node_init(root, CC_TOKEN_TRANSLATION_UNIT, NULL);
+	return cc_parse_node_visit(this->root, root);
 }
 /*****************************************************************************/
 err_t compiler_compile(struct compiler *this)
@@ -1138,7 +1307,9 @@ err_t compiler_compile(struct compiler *this)
 	if (!err)
 		compiler_cleanup0(this);
 	if (!err)
-		compiler_print_tree(this);
+		compiler_print_parse_tree(this);
+	if (!err)
+		err = compiler_visit_parse_tree(this);
 	assert(!err);
 	return err;
 }

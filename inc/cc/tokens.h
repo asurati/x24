@@ -110,3 +110,10 @@ DEF(BLOCK_ITEM_LIST)
 DEF(BLOCK_ITEM)
 DEF(FUNCTION_DEFINITION)
 DEF(FUNCTION_BODY)
+/* Grammar (CC) terminals and non-terminals end here */
+
+/*
+ * Following are non-terminals that are refinement of some of the non-termianls
+ * above. These are not used in the grammar proper (i.e. in grammar.txt). These
+ * should be used only when dealing with ast and beyond.
+ */
