@@ -18,12 +18,14 @@ the parse tree in the form of LISP-like lists.
 - A non-standard macro, `#define __x86_64__ 1`, was required as one of the
   predefined macros that x24 defines. Without it, the preprocessor attempts to
   include `gnu/stubs-32.h` and fails, as the header isn't present on my
-  machine. At the moment, this is the only non-standard macro that was
-  required. Of course, if the preprocessor is not subjected to scanning the
+  machine. Of course, if the preprocessor is not subjected to scanning the
   libc headers, it doesn't need to define such macros. Nevertheless, these
   headers provide a good test-case for testing the preprocessor.
 
-- It relies on the Earley recognizer to generate the item-sets. For the items
-  that get added into the item-set because of another reduce-item, it maintains
-  a back-edge towards the reduce-item. Once the item-sets are generated,
-  it backtracks over them, using the back-edges, to build the parse-tree.
+- Another non-standard macro, `#define __STRICT_ANSI__ 1`, was also defined to
+  avoid bringing in non-standard constructs from the glibc headers.
+
+- The parser relies on the Earley recognizer to generate the item-sets. For the
+  items that get added into the item-set because of a reduce-item, it maintains
+  a back-edge towards the reduce-item. Once the item-sets are generated, it
+  backtracks over them, using the back-edges, to build the parse-tree.
