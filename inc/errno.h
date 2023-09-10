@@ -9,7 +9,7 @@
 
 typedef int	err_t;
 
-#define ESUCCESS	0
+#define ESUCCESS	0	/* Same as EXIT_SUCCESS in stdlib.h */
 #define EBASE		32768
 #define EPARTIAL	(EBASE + 1)
 #endif
