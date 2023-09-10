@@ -1179,6 +1179,18 @@ err_t cc_parse_node_visit_external_declaration(struct cc_parse_node *this,
 	return cc_parse_node_visit(child, out);
 }
 
+/*
+ * Declaration can have these parents:
+ *	ExternalDeclaration,
+ *	IterationStatement (for loop)
+ *	BlockItem
+ *
+ *	A declaration has two parts:
+ *		DeclarationSpecifiers
+ *		InitDeclaratorList
+ *	DeclarationSpecifiers contain type and storage info, perhaps qualified.
+ *	InitDeclaratorList is the location where the identifier is found.
+ */
 static
 err_t cc_parse_node_visit_declaration(struct cc_parse_node *this,
 									  struct cc_parse_node *out)
@@ -1197,7 +1209,7 @@ err_t cc_parse_node_visit_declaration(struct cc_parse_node *this,
 	assert(0);
 	return err;
 }
-
+#if 0
 /*
  * StaticAssertDeclaration:
  *	single child, the ConstantExpression.
@@ -1259,7 +1271,7 @@ err_t cc_parse_node_visit_attribute_declaration(struct cc_parse_node *this,
 		err = cc_parse_node_add_tail_child(out, node);
 	return err;
 }
-
+#endif
 static
 err_t cc_parse_node_visit(struct cc_parse_node *this,
 						  struct cc_parse_node *out)	/* parent ast node */
@@ -1278,10 +1290,12 @@ err_t cc_parse_node_visit(struct cc_parse_node *this,
 		err = cc_parse_node_visit_external_declaration(this, out);
 	if (type == CC_TOKEN_DECLARATION)
 		err = cc_parse_node_visit_declaration(this, out);
+#if 0
 	if (type == CC_TOKEN_STATIC_ASSERT_DECLARATION)
 		err = cc_parse_node_visit_static_assert_declaration(this, out);
 	if (type == CC_TOKEN_ATTRIBUTE_DECLARATION)
 		err = cc_parse_node_visit_attribute_declaration(this, out);
+#endif
 	cc_parse_node_delete(this);
 	return err;
 }
@@ -1308,7 +1322,7 @@ err_t compiler_compile(struct compiler *this)
 		compiler_cleanup0(this);
 	if (!err)
 		compiler_print_parse_tree(this);
-	if (!err)
+	if (false && !err)
 		err = compiler_visit_parse_tree(this);
 	assert(!err);
 	return err;
