@@ -59,10 +59,8 @@ AR := llvm-ar
 
 RM := rm --one-file-system --preserve-root=all
 
-INC := -I$(SRC_PATH)
-
-LDFLAGS :=
-ARFLAGS += --thin -r -cvsP
+LDFLAGS := -fuse-ld=lld
+ARFLAGS := --thin -r -cvsP
 
 # c11 for uchar.h
 CFLAGS := -I $(SRC_PATH) -std=c11 -MMD -MP
