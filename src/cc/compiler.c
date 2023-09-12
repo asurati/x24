@@ -74,14 +74,12 @@ void cc_type_delete(void *p)
 	free(this);
 }
 /*****************************************************************************/
-err_t compiler_build_integer_types(struct compiler *this)
+err_t compiler_build_types(struct compiler *this)
 {
 	err_t err;
 	int i;
 	struct cc_type *t;
-
-	/* unqualified types. */
-	static const struct cc_type_integer types[] = {
+	static const struct cc_type_integer types[] = {	/* unqualified types. */
 		{8, 1, 7, 8, false},	/* bool */
 
 		{8, 7, 0, 8, true},		/* char */
@@ -123,7 +121,12 @@ err_t compiler_build_integer_types(struct compiler *this)
 		if (err)
 			return err;
 	}
-	return err;
+
+	t = malloc(sizeof(*t));
+	if (t == NULL)
+		return ENOMEM;
+	t->type = CC_TYPE_VOID;
+	return ptrq_add_tail(&this->types, t);
 }
 
 err_t compiler_new(const char *path,
@@ -168,7 +171,7 @@ err_t compiler_new(const char *path,
 	this->cpp_tokens_path = path;
 	this->cpp_tokens_fd = fd;
 	ptrq_init(&this->types, cc_type_delete);
-	err = compiler_build_integer_types(this);
+	err = compiler_build_types(this);
 	if (err)
 		goto err1;
 	cc_token_stream_init(&this->stream, buffer, size);

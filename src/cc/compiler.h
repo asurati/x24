@@ -349,14 +349,18 @@ bool cc_node_is_number(const struct cc_node *this)
 }
 /*****************************************************************************/
 enum cc_type_type {
-	CC_TYPE_BOOL,
-	CC_TYPE_CHAR,
+	CC_TYPE_INVALID,
+
+	CC_TYPE_BOOL,	/* is always unsigned */
+
+	CC_TYPE_SIGNED_CHAR,	/* char and signed char are different */
+
+	CC_TYPE_CHAR,	/* These are always signed */
 	CC_TYPE_SHORT,
 	CC_TYPE_INT,
 	CC_TYPE_LONG,
 	CC_TYPE_LONG_LONG,
 	CC_TYPE_BIT_INT,
-
 	CC_TYPE_BIT_FIELD,
 
 	CC_TYPE_FLOAT,
@@ -374,8 +378,16 @@ enum cc_type_type {
 	CC_TYPE_POINTER,
 	CC_TYPE_FUNCTION,
 	CC_TYPE_VOID,
-	CC_TYPE_NULL_POINTER,
 	CC_TYPE_ATOMIC,
+
+	/* qualifiers to qualify type take the same form as type */
+	CC_TYPE_QUALIFIER_CONST,
+	CC_TYPE_QUALIFIER_RESTRICT,
+	CC_TYPE_QUALIFIER_VOLATILE,
+	CC_TYPE_QUALIFIER_ATOMIC,
+
+	/* Non-grammatical. Make unsigned a qualifier */
+	CC_TYPE_QUALIFIER_UNSIGNED,
 };
 
 /*
@@ -385,7 +397,6 @@ enum cc_type_type {
  * When an ast-node for alignof(int), for e.g., is build, the node's out_type
  * is set to size_t, as alignof() returns its value in size_t type.
  */
-struct cc_type;
 struct cc_type_integer {
 	int		width;		/* in bits. padding + value + sign */
 	int		precision;	/* in bits. value bits */
@@ -400,16 +411,57 @@ struct cc_type_bit_field {
 	int	offset;
 };
 
+struct cc_type_pointer {
+	struct cc_type		*referenced_type;
+};
+
+/* Dont care about names of func/params */
+struct cc_type_function {
+	struct cc_type		*return_type;
+	struct ptr_queue	parameter_types;
+};
+
+struct cc_type_array {
+	struct cc_type	*element_type;
+	int	num_elements;	/* Should it be a cc_node? */
+	bool is_vla;
+};
+
+/* enum tag is part of symbol table. */
+struct cc_type_enumeration {
+	struct cc_type		*type;	/* type of the values */
+	struct ptr_queue	names;		/* cc_node * */
+	struct ptr_queue	values;	/* cc_node * */
+	bool	is_type_fixed;
+};
+
+/*
+ * struct/union tag is part of symbol table.
+ * These have name-type pairs for members.
+ */
+struct cc_type_struct_union {
+	struct ptr_queue	names;		/* cc_node * */
+	struct ptr_queue	types;		/* cc_type * */
+};
+
+/* There is a tree per type */
 struct cc_type {
-	enum cc_type_type type;
+	struct cc_type		*parent;
+	struct ptr_queue	children;
+	enum cc_type_type	type;
 	union {
 		struct cc_type_integer		integer;
 		struct cc_type_bit_field	bit_field;
+		struct cc_type_function		function;
+		struct cc_type_array		array;
+		struct cc_type_pointer		pointer;
+		struct cc_type_enumeration	enumeration;
+		struct cc_type_struct_union	struct_union;
 	} u;
 };
 /*****************************************************************************/
 struct compiler {
-	struct cc_node	*root;
+	struct cc_node		*root;
 	struct ptr_queue	types;
 
 	int	cpp_tokens_fd;
