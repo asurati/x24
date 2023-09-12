@@ -334,4 +334,107 @@ err_t valq_move(struct val_queue *this,
 	}
 	return ESUCCESS;
 }
+/*****************************************************************************/
+struct ptr_tree {
+	void	*parent;
+	struct ptr_queue	q;	/* q of children */
+};
+
+static inline
+void ptrt_init(struct ptr_tree *this,
+			   fn_ptrq_delete_entry *delete)
+{
+	this->parent = NULL;
+	ptrq_init(&this->q, delete);
+}
+
+static inline
+bool ptrt_has_children(const struct ptr_tree *this)
+{
+	return !ptrq_is_empty(&this->q);
+}
+
+static inline
+int ptrt_num_children(const struct ptr_tree *this)
+{
+	return ptrq_num_entries(&this->q);
+}
+
+static inline
+void *ptrt_peek_child(const struct ptr_tree *this,
+					  const int index)
+{
+	return ptrq_peek_entry(&this->q, index);
+}
+
+static inline
+void *ptrt_remove_child(struct ptr_tree *this,
+						const int index)
+{
+	return ptrq_remove_entry(&this->q, index);
+}
+
+static inline
+void ptrt_delete_child(struct ptr_tree *this,
+					   const int index)
+{
+	ptrq_delete_entry(&this->q, index);
+}
+
+static inline
+void *ptrt_peek_head_child(const struct ptr_tree *this)
+{
+	return ptrt_peek_child(this, 0);
+}
+
+static inline
+void *ptrt_remove_head_child(struct ptr_tree *this)
+{
+	return ptrt_remove_child(this, 0);
+}
+
+static inline
+void ptrt_delete_head_child(struct ptr_tree *this)
+{
+	ptrq_delete_head(&this->q);
+}
+
+static inline
+void *ptrt_peek_tail_child(const struct ptr_tree *this)
+{
+	return ptrt_peek_child(this, ptrt_num_children(this) - 1);
+}
+
+static inline
+void *ptrt_remove_tail_child(struct ptr_tree *this)
+{
+	return ptrt_remove_child(this, ptrt_num_children(this) - 1);
+}
+
+static inline
+void ptrt_delete_tail_child(struct ptr_tree *this)
+{
+	ptrq_delete_tail(&this->q);
+}
+
+static inline
+err_t ptrt_add_head_child(struct ptr_tree *this,
+						  void *child)
+{
+	return ptrq_add_head(&this->q, child);
+}
+
+static inline
+err_t ptrt_add_tail_child(struct ptr_tree *this,
+						  void *child)
+{
+	return ptrq_add_tail(&this->q, child);
+}
+
+static inline
+void ptrt_empty(struct ptr_tree *this)
+{
+	while (!ptrt_has_children(this))
+		ptrt_delete_head_child(this);
+}
 #endif
