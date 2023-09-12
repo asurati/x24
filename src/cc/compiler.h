@@ -87,6 +87,14 @@ struct cc_token {
 };
 
 static inline
+void cc_token_init(struct cc_token *this)
+{
+	this->type = CC_TOKEN_INVALID;
+	this->string = NULL;
+	this->string_len = 0;
+}
+
+static inline
 const char *cc_token_string(const struct cc_token *this)
 {
 	return this->string;
@@ -189,6 +197,7 @@ void cc_token_stream_empty(struct cc_token_stream *this)
 /*****************************************************************************/
 struct cc_type;
 struct cc_node {
+	struct ptr_tree		tree;	/* rooted at this node */
 	enum cc_token_type	type;
 	/*
 	 * When cc_token_type is used in a cc_token, it represents the C token type
@@ -218,10 +227,9 @@ struct cc_node {
 	 * type of addition here (int, char, float, bit-int, etc).
 	 */
 	struct cc_type		*out_type;
-	struct ptr_queue	child_nodes;	/* each q-entry is a cc_node* */
 };
 
-extern void cc_node_delete(void *p);
+static void cc_node_delete(void *p);
 
 static inline
 void cc_node_init(struct cc_node *this)
@@ -230,86 +238,13 @@ void cc_node_init(struct cc_node *this)
 	this->string = NULL;
 	this->out_type = NULL;
 	this->string_len = 0;
-	ptrq_init(&this->child_nodes, cc_node_delete);
+	ptrt_init(&this->tree, cc_node_delete);
 }
 
 static inline
 enum cc_token_type cc_node_type(const struct cc_node *this)
 {
 	return this->type;
-}
-
-static inline
-int cc_node_num_children(const struct cc_node *this)
-{
-	return ptrq_num_entries(&this->child_nodes);
-}
-
-static inline
-err_t cc_node_add_head_child(struct cc_node *this,
-							 struct cc_node *child)
-{
-	return ptrq_add_head(&this->child_nodes, child);
-}
-
-static inline
-err_t cc_node_add_tail_child(struct cc_node *this,
-							 struct cc_node *child)
-{
-	return ptrq_add_tail(&this->child_nodes, child);
-}
-
-static inline
-struct cc_node *
-cc_node_peek_child_node(const struct cc_node *this,
-						const int index)
-{
-	return ptrq_peek_entry(&this->child_nodes, index);
-}
-
-static inline
-struct cc_node *
-cc_node_peek_head_child(const struct cc_node *this)
-{
-	return cc_node_peek_child_node(this, 0);
-}
-
-static inline
-struct cc_node *
-cc_node_peek_tail_child(const struct cc_node *this)
-{
-	int num_children = cc_node_num_children(this);
-	return cc_node_peek_child_node(this, num_children - 1);
-}
-
-static inline
-struct cc_node *
-cc_node_remove_child_node(struct cc_node *this,
-						  const int index)
-{
-	return ptrq_remove_entry(&this->child_nodes, index);
-}
-
-static inline
-struct cc_node *
-cc_node_remove_head_child(struct cc_node *this)
-{
-	return cc_node_remove_child_node(this, 0);
-}
-
-static inline
-struct cc_node *
-cc_node_remove_tail_child(struct cc_node *this)
-{
-	int num_children = cc_node_num_children(this);
-	return cc_node_remove_child_node(this, num_children - 1);
-}
-
-static inline
-err_t cc_node_move_children(struct cc_node *this,
-							struct cc_node *to)
-{
-	return ptrq_move(&this->child_nodes, &to->child_nodes);
 }
 
 static inline
@@ -423,8 +358,8 @@ struct cc_type_function {
 
 struct cc_type_array {
 	struct cc_type	*element_type;
-	int	num_elements;	/* Should it be a cc_node? */
-	bool is_vla;
+	int		num_elements;	/* Should it be a cc_node? */
+	bool	is_vla;
 };
 
 /* enum tag is part of symbol table. */
@@ -446,8 +381,7 @@ struct cc_type_struct_union {
 
 /* There is a tree per type */
 struct cc_type {
-	struct cc_type		*parent;
-	struct ptr_queue	children;
+	struct ptr_tree		tree;
 	enum cc_type_type	type;
 	union {
 		struct cc_type_integer		integer;
@@ -460,9 +394,55 @@ struct cc_type {
 	} u;
 };
 /*****************************************************************************/
+/* sym-tab stores name-type pairs for object, funcs, types, typedefs. */
+enum cc_symbol_table_entry_type {
+	CC_SYMBOL_TABLE_ENTRY_INVALID,
+	CC_SYMBOL_TABLE_ENTRY_OBJECT,
+	CC_SYMBOL_TABLE_ENTRY_FUNCTION,
+	CC_SYMBOL_TABLE_ENTRY_TYPE_DEF,
+	CC_SYMBOL_TABLE_ENTRY_TYPE,
+};
+
+struct cc_symbol_table_entry {
+	struct cc_token	*identifier;
+	enum cc_symbol_table_entry_type	type;
+	union {
+		struct cc_type	*type;
+		struct cc_symbol_table_entry	*target;	/* type-def's target */
+	} u;
+};
+static void cc_symbol_table_entry_delete(void *p);
+
+static inline
+enum cc_symbol_table_entry_type
+cc_symbol_table_entry_type(const struct cc_symbol_table_entry *this)
+{
+	return this->type;
+}
+
+struct cc_symbol_table {
+	struct ptr_tree		tree;
+	struct ptr_queue	entries;
+};
+static void cc_symbol_table_delete(void *p);
+
+static inline
+void cc_symbol_table_init(struct cc_symbol_table *this)
+{
+	ptrt_init(&this->tree, cc_symbol_table_entry_delete);
+	ptrq_init(&this->entries, cc_symbol_table_entry_delete);
+}
+
+static inline
+err_t cc_symbol_table_add_entry(struct cc_symbol_table *this,
+								struct cc_symbol_table_entry *entry)
+{
+	return ptrq_add_tail(&this->entries, entry);
+}
+/*****************************************************************************/
 struct compiler {
-	struct cc_node		*root;
-	struct ptr_queue	types;
+	struct cc_node	root;		/* root of the ast */
+	struct cc_symbol_table	symbols;	/* root of the sym-tab-tree */
 
 	int	cpp_tokens_fd;
 	const char	*cpp_tokens_path;

@@ -60,17 +60,38 @@ void cc_token_print(const struct cc_token *this)
 	printf("\n");
 }
 /*****************************************************************************/
+static
 void cc_node_delete(void *p)
 {
 	struct cc_node *this = p;
 	free((void *)this->string);
-	ptrq_empty(&this->child_nodes);
+	ptrt_empty(&this->tree);
 	free(this);
 }
 /*****************************************************************************/
 void cc_type_delete(void *p)
 {
+	assert(0);	/* TODO */
 	struct cc_type *this = p;
+	free(this);
+}
+/*****************************************************************************/
+static
+void cc_symbol_table_entry_delete(void *p)
+{
+	struct cc_symbol_table_entry *this = p;
+	cc_token_delete(this->identifier);
+	if (cc_symbol_table_entry_type(this) == CC_SYMBOL_TABLE_ENTRY_TYPE)
+		cc_type_delete(this->u.type);
+	free(this);
+}
+/*****************************************************************************/
+static
+void cc_symbol_table_delete(void *p)
+{
+	struct cc_symbol_table *this = p;
+	ptrq_empty(&this->entries);
+	ptrt_empty(&this->tree);
 	free(this);
 }
 /*****************************************************************************/
@@ -78,55 +99,49 @@ err_t compiler_build_types(struct compiler *this)
 {
 	err_t err;
 	int i;
-	struct cc_type *t;
+	struct cc_token	*identifier;
+	struct cc_symbol_table_entry *ste;
+	struct cc_type *type;
+	static const enum cc_type_type codes[] = {	/* same order as below */
+		CC_TYPE_BOOL,
+		CC_TYPE_CHAR,
+		CC_TYPE_SHORT,
+		CC_TYPE_INT,
+		CC_TYPE_LONG,
+		CC_TYPE_LONG_LONG,
+	};
 	static const struct cc_type_integer types[] = {	/* unqualified types. */
 		{8, 1, 7, 8, false},	/* bool */
-
 		{8, 7, 0, 8, true},		/* char */
-		{8, 8, 0, 8, false},	/* unsigned char */
-
 		{16, 15, 0, 16, true},	/* short */
-		{16, 16, 0, 16, false},	/* unsigned short */
-
 		{32, 31, 0, 32, true},	/* int */
-		{32, 32, 0, 32, false},	/* unsigned int */
-
 		{64, 63, 0, 64, true},	/* long */
-		{64, 64, 0, 64, false},	/* unsigned long */
-
 		{64, 63, 0, 64, true},	/* long long */
-		{64, 64, 0, 64, false},	/* unsigned long long */
 	};
 
+	/*
+	 * The type for char will have a child with the name 'signed' since, char
+	 * and signed-char are different. Other int types are all 'signed', hence
+	 * they do not need an extra 'signed' child.
+	 */
 	for (i = 0; i < (int)ARRAY_SIZE(types); ++i) {
-		t = malloc(sizeof(*t));
-		if (t == NULL)
+		ste = malloc(sizeof(*ste));
+		identifier = malloc(sizeof(*identifier));
+		type = malloc(sizeof(*type));
+		if (type == NULL || ste == NULL || identifier == NULL)
 			return ENOMEM;
-
-		switch (i) {
-		case 0: t->type = CC_TYPE_BOOL; break;
-		case 1:
-		case 2: t->type = CC_TYPE_CHAR; break;
-		case 3:
-		case 4: t->type = CC_TYPE_SHORT; break;
-		case 5:
-		case 6: t->type = CC_TYPE_INT; break;
-		case 7:
-		case 8: t->type = CC_TYPE_LONG; break;
-		case 9:
-		case 10: t->type = CC_TYPE_LONG_LONG; break;
-		}
-		memcpy(&t->u.integer, &types[i], sizeof(types[i]));
-		err = ptrq_add_tail(&this->types, t);
+		cc_token_init(identifier);
+		identifier->type = CC_TOKEN_BOOL;
+		type->type = codes[i];
+		memcpy(&type->u.integer, &types[i], sizeof(types[i]));
+		ste->identifier = identifier;
+		ste->type = CC_SYMBOL_TABLE_ENTRY_TYPE;
+		ste->u.type = type;
+		err = cc_symbol_table_add_entry(&this->symbols, ste);
 		if (err)
 			return err;
 	}
-
-	t = malloc(sizeof(*t));
-	if (t == NULL)
-		return ENOMEM;
-	t->type = CC_TYPE_VOID;
-	return ptrq_add_tail(&this->types, t);
+	return err;
 }
 
 err_t compiler_new(const char *path,
@@ -167,10 +182,12 @@ err_t compiler_new(const char *path,
 		err = errno;
 		goto err1;
 	}
-	this->root = NULL;
 	this->cpp_tokens_path = path;
 	this->cpp_tokens_fd = fd;
-	ptrq_init(&this->types, cc_type_delete);
+
+	cc_node_init(&this->root);
+	cc_symbol_table_init(&this->symbols);
+	this->root.type = CC_TOKEN_TRANSLATION_UNIT;
 	err = compiler_build_types(this);
 	if (err)
 		goto err1;
@@ -197,7 +214,8 @@ void compiler_cleanup0(struct compiler *this)
 err_t compiler_delete(struct compiler *this)
 {
 	assert(this);
-	cc_node_delete(this->root);
+	cc_node_delete(&this->root);
+	cc_symbol_table_delete(&this->symbols);
 	free(this);
 	return ESUCCESS;
 }
