@@ -80,7 +80,13 @@ DEF(SHIFT_LEFT_ASSIGN)
 DEF(SHIFT_RIGHT_ASSIGN)
 DEF(ELLIPSIS)
 
-/* Identifier and Keywords. Same order as g_key_words */
+/*
+ * Identifier and Keywords. Same order as g_key_words.
+ * Keey it here, so that lexer can convert strings that match keywords (even
+ * C keywords) and punctuators into appropriate token types, so that their
+ * strings do not need to be passed around.
+ */
+
 DEF(IDENTIFIER)
 DEF(ATOMIC)
 DEF(BIT_INT)

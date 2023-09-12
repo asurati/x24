@@ -9,17 +9,28 @@
 
 #include <inc/types.h>
 
+/*
+ * Only terminals, including char-consts, string-literals, integer-consts,
+ * floating-consts, punctuators, keywords and identifiers.
+ */
 enum cc_token_type {
 #define DEF(t)	CC_TOKEN_ ## t,
-#include <inc/cpp/tokens.h>
-#include <inc/cc/tokens.h>
+#include <inc/cpp/tokens.h>	/* grammar terminals */
+#include <inc/cc/tokens.h>	/* grammar non-terminals */
 #undef DEF
 };
 
 static inline
+bool cc_token_type_is_terminal(const enum cc_token_type this)
+{
+	assert(this != CC_TOKEN_NUMBER && this != CC_TOKEN_INVALID);
+	return this > CC_TOKEN_INVALID && this <= CC_TOKEN_WHILE;
+}
+
+static inline
 bool cc_token_type_is_non_terminal(const enum cc_token_type this)
 {
-	return this >= CC_TOKEN_TRANSLATION_OBJECT;
+	return !cc_token_type_is_terminal(this);
 }
 
 static inline
@@ -38,6 +49,26 @@ static inline
 bool cc_token_type_is_identifier(const enum cc_token_type this)
 {
 	return this == CC_TOKEN_IDENTIFIER || cc_token_type_is_key_word(this);
+}
+
+static inline
+bool cc_token_type_is_string_literal(const enum cc_token_type this)
+{
+	return (this >= CC_TOKEN_CHAR_STRING_LITERAL &&
+			this <= CC_TOKEN_WCHAR_T_STRING_LITERAL);
+}
+
+static inline
+bool cc_token_type_is_char_const(const enum cc_token_type this)
+{
+	return (this >= CC_TOKEN_INTEGER_CHAR_CONST &&
+			this <= CC_TOKEN_WCHAR_T_CHAR_CONST);
+}
+
+static inline
+bool cc_token_type_is_number(const enum cc_token_type this)
+{
+	return this >= CC_TOKEN_INTEGER_CONST && this <= CC_TOKEN_FLOATING_CONST;
 }
 
 struct cc_token {
@@ -73,14 +104,6 @@ enum cc_token_type cc_token_type(const struct cc_token *this)
 	return this->type;
 }
 
-static inline
-bool cc_token_is_predefined_const(const struct cc_token *this)
-{
-	return (cc_token_type(this) == CC_TOKEN_TRUE ||
-			cc_token_type(this) == CC_TOKEN_FALSE ||
-			cc_token_type(this) == CC_TOKEN_NULL_PTR);
-}
-
 /* a keyword is also an identifier */
 static inline
 bool cc_token_is_key_word(const struct cc_token *this)
@@ -103,22 +126,26 @@ bool cc_token_is_identifier(const struct cc_token *this)
 static inline
 bool cc_token_is_string_literal(const struct cc_token *this)
 {
-	return (cc_token_type(this) >= CC_TOKEN_CHAR_STRING_LITERAL &&
-			cc_token_type(this) <= CC_TOKEN_WCHAR_T_STRING_LITERAL);
+	return cc_token_type_is_string_literal(cc_token_type(this));
 }
 
 static inline
 bool cc_token_is_char_const(const struct cc_token *this)
 {
-	return (cc_token_type(this) >= CC_TOKEN_INTEGER_CHAR_CONST &&
-			cc_token_type(this) <= CC_TOKEN_WCHAR_T_CHAR_CONST);
+	return cc_token_type_is_char_const(cc_token_type(this));
 }
 
+static inline
+bool cc_token_is_number(const struct cc_token *this)
+{
+	return cc_token_type_is_number(cc_token_type(this));
+}
 void cc_token_delete(void *this);
 /*****************************************************************************/
 struct cc_token_stream {
 	const char	*buffer;	/* file containing the cpp_tokens */
 	size_t		buffer_size;
+	size_t		position;
 	struct ptr_queue	q;
 };
 
@@ -129,10 +156,11 @@ void cc_token_stream_init(struct cc_token_stream *this,
 {
 	this->buffer = buffer;
 	this->buffer_size = buffer_size;
+	this->position = 0;
 	ptrq_init(&this->q, cc_token_delete);
 	/* Each entry in the queue is a pointer. */
 }
-
+#if 0
 static inline
 bool cc_token_stream_is_empty(const struct cc_token_stream *this)
 {
@@ -152,218 +180,240 @@ err_t cc_token_stream_add_head(struct cc_token_stream *this,
 {
 	return ptrq_add_head(&this->q, token);
 }
-
+#endif
 static inline
 void cc_token_stream_empty(struct cc_token_stream *this)
 {
 	ptrq_empty(&this->q);
 }
 /*****************************************************************************/
-/* an element can be either a terminal or a non-terminal. */
-struct cc_grammar_rule {
-	struct val_queue	elements;
-};
-
-void cc_grammar_rule_delete(void *p);
-
-/* terminals + non-terminals. rules valid for non-terminals alone */
-struct cc_grammar_element {
+struct cc_type;
+struct cc_node {
 	enum cc_token_type	type;
-	struct val_queue	rules;
-};
-
-struct cc_grammar_back_info {
-	struct cc_token *token;
-	int	item_set;
-	int	item;
-};
-
-#if 0
-/*
- * element, rule, origin uniqueuely identifies an item.
- * We can therefore place array of back pointers here.
- */
-struct cc_base_item {
-	const struct cc_grammar_element	*element;	/* the lhs element */
-	int	rule;	/* index into ge.rules */
-
-	/* The item-set where this item with dot-pos 0 was added by predn */
-	int	origin;
-	int	ref_count;
-
 	/*
-	 * 0th non-terminal in the rhs is at index 0, etc.
-	 * Each entry in the queue is a cc_grammar_item*.
-	 */
-	struct ptr_queue	back;
-};
-#endif
-struct cc_grammar_item {
-	const struct cc_grammar_element	*element;	/* The lhs element */
-	int	rule;	/* index into ge.rules */
-	int	dot_position;	/* 0 <= dot-pos <= rule.num_entries */
-	int	origin;
-	/*
-	 * origin is the item-set where the corresponding item with dot-pos == 0
-	 * was added by the prediction.
+	 * When cc_token_type is used in a cc_token, it represents the C token type
+	 * - grammatical terminals and non-terminals.
+	 * When cc_token_type is used in a cc_node, it represents the type of an
+	 * AST node.
 	 */
 
 	/*
-	 * If this item is being added because of a completion of another item,
-	 * this item must point back to the reduce-item that cause this item to be
-	 * added.
+	 * For identifiers, this is the cpp's resolved name. i.e. any esc-seqs in
+	 * the original src were resolved to the corresponding src-char-set-encoded
+	 * byte stream (src-char-set is assume to be utf-8.)
+	 * That stream is stored here.
+	 *
+	 * For string-literals and char-consts, this is their exec-char-set
+	 * representation.
+	 *
+	 * For numbers too.
+	 *
+	 * For keywords and punctuators it is null.
 	 */
-	const struct cc_grammar_item *back;
-	int	back_item_set;
-	int	back_item;
-};
+	const char	*string;
+	size_t		string_len;	/* doesn't include the nul char */
 
-void cc_grammar_item_delete(void *p);
-
-/*
- * Earley item-set.
- * As long as any item still points to the item-set, we cannot free it.
- * items whose origin is the same as the item-set do not contribute to the
- * ref-count.
- * TODO McLean/Horspool impl to combine lr(1) and Earley.
- */
-struct cc_grammar_item_set {
-	int index;
-	struct ptr_queue	reduce_items;
-	struct ptr_queue	shift_items;
-	struct cc_token		*token;
 	/*
-	 * Token is valid for item-set-#1 and above. It is stored here until the
-	 * parse is complete, after which it will become parse of the parse tree.
+	 * For e.g. a node of type CC_NODE_PLUS (binary +) will report the
+	 * type of addition here (int, char, float, bit-int, etc).
 	 */
+	struct cc_type		*out_type;
+	struct ptr_queue	child_nodes;	/* each q-entry is a cc_node* */
 };
+
+extern void cc_node_delete(void *p);
 
 static inline
-void cc_grammar_item_set_init(struct cc_grammar_item_set *this,
-							  const int index)
+void cc_node_init(struct cc_node *this)
 {
-	ptrq_init(&this->reduce_items, cc_grammar_item_delete);
-	ptrq_init(&this->shift_items, cc_grammar_item_delete);
-	this->token = NULL;
-	this->index = index;
-}
-
-/*
- * token is meant to store token that need its string info to
- * identify themselves; for e.g. identifiers, numbers, strings, etc.
- * key-words, puntuators do not need to store their tokens.
- */
-struct cc_parse_node {
-	enum cc_token_type	type;
-	struct cc_token		*token;
-	struct ptr_queue	child_nodes;	/* each q-entry is a cc_parse_node* */
-};
-
-extern void cc_parse_node_delete(void *p);
-
-static inline
-void cc_parse_node_init(struct cc_parse_node *this,
-						const enum cc_token_type type,
-						struct cc_token *token)
-{
-	this->type = type;
-	this->token = token;
-	ptrq_init(&this->child_nodes, cc_parse_node_delete);
+	this->type = CC_TOKEN_INVALID;
+	this->string = NULL;
+	this->out_type = NULL;
+	this->string_len = 0;
+	ptrq_init(&this->child_nodes, cc_node_delete);
 }
 
 static inline
-enum cc_token_type cc_parse_node_type(const struct cc_parse_node *this)
+enum cc_token_type cc_node_type(const struct cc_node *this)
 {
 	return this->type;
 }
 
 static inline
-int cc_parse_node_num_children(const struct cc_parse_node *this)
+int cc_node_num_children(const struct cc_node *this)
 {
 	return ptrq_num_entries(&this->child_nodes);
 }
 
 static inline
-err_t cc_parse_node_add_head_child(struct cc_parse_node *this,
-								   struct cc_parse_node *child)
+err_t cc_node_add_head_child(struct cc_node *this,
+							 struct cc_node *child)
 {
 	return ptrq_add_head(&this->child_nodes, child);
 }
 
 static inline
-err_t cc_parse_node_add_tail_child(struct cc_parse_node *this,
-								   struct cc_parse_node *child)
+err_t cc_node_add_tail_child(struct cc_node *this,
+							 struct cc_node *child)
 {
 	return ptrq_add_tail(&this->child_nodes, child);
 }
 
 static inline
-struct cc_parse_node *
-cc_parse_node_peek_child_node(const struct cc_parse_node *this,
-							  const int index)
+struct cc_node *
+cc_node_peek_child_node(const struct cc_node *this,
+						const int index)
 {
 	return ptrq_peek_entry(&this->child_nodes, index);
 }
 
 static inline
-struct cc_parse_node *
-cc_parse_node_peek_head_child(const struct cc_parse_node *this)
+struct cc_node *
+cc_node_peek_head_child(const struct cc_node *this)
 {
-	return cc_parse_node_peek_child_node(this, 0);
+	return cc_node_peek_child_node(this, 0);
 }
 
 static inline
-struct cc_parse_node *
-cc_parse_node_peek_tail_child(const struct cc_parse_node *this)
+struct cc_node *
+cc_node_peek_tail_child(const struct cc_node *this)
 {
-	int num_children = cc_parse_node_num_children(this);
-	return cc_parse_node_peek_child_node(this, num_children - 1);
+	int num_children = cc_node_num_children(this);
+	return cc_node_peek_child_node(this, num_children - 1);
 }
 
 static inline
-struct cc_parse_node *
-cc_parse_node_remove_child_node(struct cc_parse_node *this,
-								const int index)
+struct cc_node *
+cc_node_remove_child_node(struct cc_node *this,
+						  const int index)
 {
 	return ptrq_remove_entry(&this->child_nodes, index);
 }
 
 static inline
-struct cc_parse_node *
-cc_parse_node_remove_head_child(struct cc_parse_node *this)
+struct cc_node *
+cc_node_remove_head_child(struct cc_node *this)
 {
-	return cc_parse_node_remove_child_node(this, 0);
+	return cc_node_remove_child_node(this, 0);
 }
 
 static inline
-struct cc_parse_node *
-cc_parse_node_remove_tail_child(struct cc_parse_node *this)
+struct cc_node *
+cc_node_remove_tail_child(struct cc_node *this)
 {
-	int num_children = cc_parse_node_num_children(this);
-	return cc_parse_node_remove_child_node(this, num_children - 1);
+	int num_children = cc_node_num_children(this);
+	return cc_node_remove_child_node(this, num_children - 1);
 }
 
 static inline
-err_t cc_parse_node_move_children(struct cc_parse_node *this,
-								  struct cc_parse_node *to)
+err_t cc_node_move_children(struct cc_node *this,
+							struct cc_node *to)
 {
 	return ptrq_move(&this->child_nodes, &to->child_nodes);
 }
+
+static inline
+bool cc_node_is_key_word(const struct cc_node *this)
+{
+	return cc_token_type_is_key_word(cc_node_type(this));
+}
+
+static inline
+bool cc_node_is_punctuator(const struct cc_node *this)
+{
+	return cc_token_type_is_punctuator(cc_node_type(this));
+}
+
+static inline
+bool cc_node_is_identifier(const struct cc_node *this)
+{
+	return cc_token_type_is_identifier(cc_node_type(this));
+}
+
+static inline
+bool cc_node_is_string_literal(const struct cc_node *this)
+{
+	return cc_token_type_is_string_literal(cc_node_type(this));
+}
+
+static inline
+bool cc_node_is_char_const(const struct cc_node *this)
+{
+	return cc_token_type_is_char_const(cc_node_type(this));
+}
+
+static inline
+bool cc_node_is_number(const struct cc_node *this)
+{
+	return cc_token_type_is_number(cc_node_type(this));
+}
 /*****************************************************************************/
-struct cc_parse_stack_entry {
-	struct cc_parse_node *node;
-	int	back_item_set;
-	int	back_item;
+enum cc_type_type {
+	CC_TYPE_BOOL,
+	CC_TYPE_CHAR,
+	CC_TYPE_SHORT,
+	CC_TYPE_INT,
+	CC_TYPE_LONG,
+	CC_TYPE_LONG_LONG,
+	CC_TYPE_BIT_INT,
+
+	CC_TYPE_BIT_FIELD,
+
+	CC_TYPE_FLOAT,
+	CC_TYPE_DOUBLE,
+	CC_TYPE_LONG_DOUBLE,
+	CC_TYPE_DECIMAL_32,
+	CC_TYPE_DECIMAL_64,
+	CC_TYPE_DECIMAL_128,
+	CC_TYPE_COMPLEX,
+
+	CC_TYPE_ENUMERATION,
+	CC_TYPE_STRUCTURE,
+	CC_TYPE_UNION,
+	CC_TYPE_ARRAY,
+	CC_TYPE_POINTER,
+	CC_TYPE_FUNCTION,
+	CC_TYPE_VOID,
+	CC_TYPE_NULL_POINTER,
+	CC_TYPE_ATOMIC,
+};
+
+/*
+ * We assume that sizeof(int) >= 4 bytes = 32 bits.
+ * alignments are represented as values of type size_t. But we use int here as
+ * alignof(max_align_t) is 0x10, which is representable in an int.
+ * When an ast-node for alignof(int), for e.g., is build, the node's out_type
+ * is set to size_t, as alignof() returns its value in size_t type.
+ */
+struct cc_type;
+struct cc_type_integer {
+	int		width;		/* in bits. padding + value + sign */
+	int		precision;	/* in bits. value bits */
+	int		padding;	/* in bits. */
+	int		alignment;	/* in bits. */
+	bool	is_signed;
+};
+
+struct cc_type_bit_field {
+	struct cc_type	*type;	/* The underlying type int or bool */
+	int width;
+	int	offset;
+};
+
+struct cc_type {
+	enum cc_type_type type;
+	union {
+		struct cc_type_integer		integer;
+		struct cc_type_bit_field	bit_field;
+	} u;
 };
 /*****************************************************************************/
 struct compiler {
-	struct val_queue	elements;	/* Only non-terminals */
-	struct val_queue	item_sets;
-	struct cc_parse_node	*root;
+	struct cc_node	*root;
+	struct ptr_queue	types;
 
 	int	cpp_tokens_fd;
 	const char	*cpp_tokens_path;
 	struct cc_token_stream	stream;
 };
-err_t cc_load_grammar(struct compiler *this);
 #endif
