@@ -207,8 +207,6 @@ void print_element(const int index)
 	for (i = 0; i < e->num_firsts; ++i) {
 		j = e->firsts[i];
 		printf(" %s", elements[j].name);
-		if (j != e->num_firsts - 1)
-			printf(",");
 	}
 	printf("\n");
 	printf("\n");
@@ -407,12 +405,19 @@ void build_find_first_graph()
 			assert(r->num_rhs);
 			for (k = 0; k < r->num_rhs; ++k) {
 				te = &elements[r->rhs[k]];
-				if (te == e)
+				assert(te->generate_epsilon_done);
+				if (te == e) {
+					/*
+					 * If e cannot generate epsilon, then do not go any
+					 * further.
+					 */
+					if (te->can_generate_epsilon == false)
+						break;
 					continue;
+				}
 				add_edge(e, te);
 
 				// if te cannot gen epsilon, done.
-				assert(te->generate_epsilon_done);
 				if (te->can_generate_epsilon == false)
 					break;
 			}
@@ -1454,10 +1459,8 @@ int main(int argc, char **argv)
 		qsort(e->firsts, e->num_firsts, sizeof(int), cmpfunc);
 	}
 #endif
-#if 0
 	for (i = 0; i < num_elements; ++i)
 		print_element(i);
-#endif
 	num_sets = 1;
 	sets = malloc(num_sets * sizeof(set));
 	set = calloc(1, sizeof(*set));
