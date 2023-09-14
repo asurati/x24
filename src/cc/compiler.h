@@ -469,7 +469,7 @@ enum cc_type_type {
 	CC_TYPE_QUALIFIER_ATOMIC,
 
 	/* Non-grammatical. Make unsigned a qualifier */
-	CC_TYPE_QUALIFIER_UNSIGNED,
+	/* CC_TYPE_QUALIFIER_UNSIGNED, */
 };
 
 /*

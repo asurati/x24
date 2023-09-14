@@ -351,6 +351,12 @@ void ptrt_init(struct ptr_tree *this,
 }
 
 static inline
+void *ptrt_parent(const struct ptr_tree *this)
+{
+	return this->parent;
+}
+
+static inline
 bool ptrt_has_children(const struct ptr_tree *this)
 {
 	return !ptrq_is_empty(&this->q);
