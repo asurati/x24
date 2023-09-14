@@ -340,6 +340,8 @@ struct ptr_tree {
 	struct ptr_queue	q;	/* q of children */
 };
 
+#define PTRT_FOR_EACH_CHILD(t, ix, c)	PTRQ_FOR_EACH(&(t)->q, ix, c)
+
 static inline
 void ptrt_init(struct ptr_tree *this,
 			   fn_ptrq_delete_entry *delete)

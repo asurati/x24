@@ -29,6 +29,7 @@ extern const char *g_punctuators[];
 static
 err_t compiler_parse(struct compiler *this,
 					 const enum cc_token_type type,
+					 struct cc_node *in[],
 					 struct cc_node **out);
 /*****************************************************************************/
 static const char *g_cc_token_type_str[] = {
@@ -61,28 +62,37 @@ void cc_token_print(const struct cc_token *this)
 }
 /*****************************************************************************/
 static
+struct cc_node *cc_node_new(const enum cc_token_type type)
+{
+	struct cc_node *this = malloc(sizeof(*this));
+	cc_node_init(this);
+	this->type = type;
+	return this;
+}
+
+static
 void cc_node_delete(void *p)
 {
+	/* TODO free based on type */
 	struct cc_node *this = p;
-	free((void *)this->string);
 	ptrt_empty(&this->tree);
 	free(this);
 }
 /*****************************************************************************/
 void cc_type_delete(void *p)
 {
-	assert(0);	/* TODO */
 	struct cc_type *this = p;
 	free(this);
+	/* TODO: free based on cc_type_type */
 }
 /*****************************************************************************/
 static
 void cc_symbol_table_entry_delete(void *p)
 {
 	struct cc_symbol_table_entry *this = p;
-	cc_token_delete(this->identifier);
-	if (cc_symbol_table_entry_type(this) == CC_SYMBOL_TABLE_ENTRY_TYPE)
-		cc_type_delete(this->u.type);
+	cc_node_delete(this->name);
+	if (cc_symbol_table_entry_type(this) == CC_SYMBOL_TABLE_ENTRY_TYPE_TREE)
+		cc_type_delete(this->u.root);
 	free(this);
 }
 /*****************************************************************************/
@@ -99,7 +109,9 @@ err_t compiler_build_types(struct compiler *this)
 {
 	err_t err;
 	int i;
-	struct cc_token	*identifier;
+	char *str;
+	struct cc_node	*node;
+	struct cc_node_identifier *ident;
 	struct cc_symbol_table_entry *ste;
 	struct cc_type *type;
 	static const enum cc_type_type codes[] = {	/* same order as below */
@@ -121,23 +133,59 @@ err_t compiler_build_types(struct compiler *this)
 
 	/*
 	 * The type for char will have a child with the name 'signed' since, char
-	 * and signed-char are different. Other int types are all 'signed', hence
-	 * they do not need an extra 'signed' child.
+	 * and signed-char are different, incompatible types. Other int types are
+	 * all 'signed', hence they do not need an extra 'signed' child.
 	 */
 	for (i = 0; i < (int)ARRAY_SIZE(types); ++i) {
 		ste = malloc(sizeof(*ste));
-		identifier = malloc(sizeof(*identifier));
+		node = malloc(sizeof(*node));
 		type = malloc(sizeof(*type));
-		if (type == NULL || ste == NULL || identifier == NULL)
+		if (type == NULL || ste == NULL || node == NULL)
 			return ENOMEM;
-		cc_token_init(identifier);
-		identifier->type = CC_TOKEN_BOOL;
+
+		cc_node_init(node);
+		node->out_type = type;
+		ident = &node->u.identifier;
+		ident->string = NULL;
+		ident->string_len = 0;
+		ident->scope = this->symbols;
+		ident->storage = CC_TOKEN_INVALID;	/* types are not objects */
+		ident->linkage = CC_LINKAGE_EXTERNAL;
+		ident->name_space = CC_NAME_SPACE_ORDINARY;
+
+		/* key-words are also identifiers */
+		switch (codes[i]) {
+		case CC_TYPE_BOOL:
+			node->type = CC_TOKEN_BOOL; break;
+		case CC_TYPE_CHAR:
+			node->type = CC_TOKEN_CHAR; break;
+		case CC_TYPE_SHORT:
+			node->type = CC_TOKEN_SHORT; break;
+		case CC_TYPE_INT:
+			node->type = CC_TOKEN_INT; break;
+		case CC_TYPE_LONG:
+			node->type = CC_TOKEN_LONG; break;
+		case CC_TYPE_LONG_LONG:
+			/*
+			 * There's no keyword 'long long', although the corresponding type
+			 * is a root type.
+			 */
+			node->type = CC_TOKEN_IDENTIFIER;
+			ident->string = str = malloc(strlen("long long") + 1);
+			if (str == NULL)
+				return ENOMEM;
+			strcpy(str, "long long");
+			break;
+		default:
+			assert(0);
+			return EINVAL;
+		}
 		type->type = codes[i];
 		memcpy(&type->u.integer, &types[i], sizeof(types[i]));
-		ste->identifier = identifier;
-		ste->type = CC_SYMBOL_TABLE_ENTRY_TYPE;
-		ste->u.type = type;
-		err = cc_symbol_table_add_entry(&this->symbols, ste);
+		ste->name = node;
+		ste->type = CC_SYMBOL_TABLE_ENTRY_TYPE_TREE;
+		ste->u.root = type;
+		err = cc_symbol_table_add_entry(this->symbols, ste);
 		if (err)
 			return err;
 	}
@@ -184,10 +232,13 @@ err_t compiler_new(const char *path,
 	}
 	this->cpp_tokens_path = path;
 	this->cpp_tokens_fd = fd;
-
-	cc_node_init(&this->root);
-	cc_symbol_table_init(&this->symbols);
-	this->root.type = CC_TOKEN_TRANSLATION_UNIT;
+	this->root = NULL;
+	this->symbols = malloc(sizeof(*this->symbols));
+	if (this->symbols == NULL) {
+		err = ENOMEM;
+		goto err1;
+	}
+	cc_symbol_table_init(this->symbols);
 	err = compiler_build_types(this);
 	if (err)
 		goto err1;
@@ -594,17 +645,19 @@ err_t compiler_parse_translation_unit(struct compiler *this,
 									  struct cc_node **out)
 {
 	err_t err;
+	enum cc_token_type type;
 	struct cc_node *root;
 
-	/* TranslationUnit is an array of ExternalDeclaration */
+	/* TranslationUnit is the root of ast; array of ExternalDeclaration */
 	assert(*out == NULL);
-	root = malloc(sizeof(*root));
+	root = cc_node_new(CC_TOKEN_TRANSLATION_UNIT);
 	if (root == NULL)
 		return ENOMEM;
-	cc_node_init(root);
-	root->type = CC_TOKEN_TRANSLATION_UNIT;
+
+	/* Parse array of ExternalDeclaration */
+	type = CC_TOKEN_EXTERNAL_DECLARATION;
 	while (true) {
-		err = compiler_parse(this, CC_TOKEN_EXTERNAL_DECLARATION, &root);
+		err = compiler_parse(this, type, NULL, &root);
 		if (err)
 			break;
 	}
@@ -627,27 +680,28 @@ err_t compiler_parse_external_declaration(struct compiler *this,
 	struct cc_node *specifiers;
 	struct cc_node *declarator;
 	struct cc_node *definition;
+	struct cc_node *declaration;
+	struct cc_node *nodes[5];
 
 	parent = *out;
 	assert(parent);
 	assert(cc_node_type(parent) == CC_TOKEN_TRANSLATION_UNIT);
 
 	/* Is it a static_assert declaration? */
-	attributes = NULL;
 	stream = &this->stream;
 	err = cc_token_stream_peek_head(stream, &token);
 	if (err)
 		return err;
-
 	if (cc_token_type(token) == CC_TOKEN_STATIC_ASSERT) {
 		type = CC_TOKEN_STATIC_ASSERT_DECLARATION;
-		return compiler_parse(this, type, out);
+		return compiler_parse(this, type, NULL, out);
 	}
 
 	/* Is it an AttributeDeclaration? */
+	attributes = NULL;
 	if (cc_token_type(token) == CC_TOKEN_LEFT_BRACKET) {
 		type = CC_TOKEN_ATTRIBUTE_SPECIFIER_SEQUENCE;
-		err = compiler_parse(this, type, &attributes);
+		err = compiler_parse(this, type, NULL, &attributes);
 		if (!err)
 			err = cc_token_stream_peek_head(stream, &token);
 		if (!err && cc_token_type(token) == CC_TOKEN_SEMI_COLON) {
@@ -663,43 +717,120 @@ err_t compiler_parse_external_declaration(struct compiler *this,
 	}
 
 	/* Is it a FunctionDefinition. */
-	err = compiler_parse(this, CC_TOKEN_DECLARATION_SPECIFIERS, &specifiers);
-	if (!err)
-		err = compiler_parse(this, CC_TOKEN_DECLARATOR, &declarator);
-	if (!err)
-		err = cc_token_stream_peek_head(stream, &token);
-	if (!err && cc_token_type(token) == CC_TOKEN_LEFT_BRACE) {
-		definition = malloc(sizeof(*definition));
-		if (definition == NULL)
-			return ENOMEM;
-		cc_node_init(definition);
-		definition->type = CC_TOKEN_FUNCTION_DEFINITION;
-		if (attributes)
-			err = cc_node_add_tail_child(definition, attributes);
-		if (!err)
-			err = cc_node_add_tail_child(definition, specifiers);
-		if (!err)
-			err = cc_node_add_tail_child(definition, declarator);
+	specifiers = declarator = definition = declaration = NULL;
+	type = CC_TOKEN_DECLARATION_SPECIFIERS;
+	err = compiler_parse(this, type, NULL, &specifiers);
+	if (!err) {
+		type = CC_TOKEN_DECLARATOR;
+		err = compiler_parse(this, type, NULL, &declarator);
 	}
+	if (err)
+		return err;
+
+	nodes[0] = attributes;	/* may be null */
+	nodes[1] = specifiers;
+	nodes[2] = declarator;
+	nodes[3] = NULL;
+	err = cc_token_stream_peek_head(stream, &token);
+	if (err)
+		return err;
+	type = CC_TOKEN_DECLARATION;
+	if (cc_token_type(token) == CC_TOKEN_LEFT_BRACE)
+		type = CC_TOKEN_FUNCTION_DEFINITION;
+	return compiler_parse(this, type, nodes, out);
+}
+
+static
+err_t compiler_parse_declaration_specifiers(struct compiler *this,
+											struct cc_node **out)
+{
+	err_t err;
+	enum cc_token_type type;
+	struct cc_node *specifiers, *specifier, *attributes;
+	struct cc_token_stream *stream;
+	struct cc_token *token;
+
+	assert(*out == NULL);	/* No parent. Create ourselves and return */
+
+	/*
+	 * array of DeclarationSpecifier elements, each element optionally followed
+	 * by AttributeSpecifierSequence.
+	 */
+	stream = &this->stream;
+	specifiers = cc_node_new(CC_TOKEN_DECLARATION_SPECIFIERS);
+	if (specifiers == NULL)
+		return ENOMEM;
+
+	while (true) {
+		/* We do not expect an error, not even an EOF */
+		err = cc_token_stream_peek_head(stream, &token);
+		if (err)
+			return err;
+		if (!cc_token_is_storage_class_specifier(token) &&
+			!cc_token_is_type_specifier(token) &&
+			!cc_token_is_type_qualifier(token) &&
+			!cc_token_is_alignment_specifier(token) &&
+			!cc_token_is_function_specifier(token))
+			break;
+
+		/*
+		 * StorageClassSpecifiers, TypeQualifiers, and FunctionSpecifiers are
+		 * keywords. TypeSpecifiers and AlignmentSpecifiers are compound
+		 * constructs.
+		 */
+		err = cc_token_stream_remove_head(stream, &token);
+		assert(err == ESUCCESS);
+		specifier = cc_node_new(cc_token_type(token));
+		if (specifier == NULL)
+			err = ENOMEM;
+		cc_token_delete(token);
+		if (!err)
+			err = cc_node_add_tail_child(specifiers, specifier);
+		if (err)
+			return err;
+
+		/* Does an AttributeSpecifierSequence follow? */
+		attributes = NULL;
+		err = cc_token_stream_peek_head(stream, &token);
+		if (err || cc_token_type(token) != CC_TOKEN_LEFT_BRACKET)
+			continue;
+		type = CC_TOKEN_ATTRIBUTE_SPECIFIER_SEQUENCE;
+		err = compiler_parse(this, type, NULL, &attributes);
+		if (!err)
+			err = cc_node_add_tail_child(specifiers, attributes);
+		if (err)
+			return err;
+	}
+	assert(err == ESUCCESS);
 	return err;
 }
 
 static
 err_t compiler_parse(struct compiler *this,
 					 const enum cc_token_type type,
+					 struct cc_node *in[],
 					 struct cc_node **out)
 {
 	err_t err;
 
 	switch (type) {
 	case CC_TOKEN_TRANSLATION_UNIT:
+		assert(in == NULL);
 		err = compiler_parse_translation_unit(this, out);
 		break;
 	case CC_TOKEN_EXTERNAL_DECLARATION:
+		assert(in == NULL);
 		err = compiler_parse_external_declaration(this, out);
 		break;
+	case CC_TOKEN_DECLARATION_SPECIFIERS:
+		assert(in == NULL);
+		err = compiler_parse_declaration_specifiers(this, out);
+		break;
 	default:
+		printf("%s: %s unsupported\n", __func__,
+			   g_cc_token_type_str[type]);
 		err = EINVAL;
+		exit(err);
 		break;
 	}
 	return err;
@@ -713,20 +844,20 @@ void cc_node_print(const struct cc_node *this)
 
 	/*
 	 * Only identifiers, numbers, char-consts, and string-literals have
-	 * string.
+	 * non-null string field. The string is not nul terminated.
 	 */
 	printf("\n(");
-	if (cc_node_is_number(this) ||
-		cc_node_is_identifier(this) ||
-		cc_node_is_char_const(this) ||
-		cc_node_is_string_literal(this)) {
-		assert(this->string);
-		for (i = 0; i < (int)this->string_len; ++i)
-			printf("%c", this->string[i]);
-	} else {
+	if (cc_node_is_identifier(this) && ! cc_node_is_key_word(this))
+		printf("%s", this->u.identifier.string);
+	else if (cc_node_is_number(this))
+		printf("%s", this->u.number.string);
+	else if (cc_node_is_char_const(this))
+		printf("%s", this->u.char_const.string);
+	else if (cc_node_is_string_literal(this))
+		printf("%s", this->u.string_literal.string);
+	else
 		printf("%s", &g_cc_token_type_str[this->type][strlen("CC_TOKEN_")]);
-	}
-	PTRQ_FOR_EACH(&this->child_nodes, i, child)
+	PTRT_FOR_EACH_CHILD(&this->tree, i, child)
 		cc_node_print(child);
 	printf(")\n");
 }
@@ -740,7 +871,10 @@ void compiler_print_ast(const struct compiler *this)
 err_t compiler_compile(struct compiler *this)
 {
 	err_t err;
-	err = compiler_parse(this, CC_TOKEN_TRANSLATION_UNIT, &this->root);
+	enum cc_token_type type;
+
+	type = CC_TOKEN_TRANSLATION_UNIT;
+	err = compiler_parse(this, type, NULL, &this->root);
 	if (!err)
 		compiler_cleanup0(this);
 #if 0

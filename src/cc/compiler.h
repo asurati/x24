@@ -71,6 +71,66 @@ bool cc_token_type_is_number(const enum cc_token_type this)
 	return this >= CC_TOKEN_INTEGER_CONST && this <= CC_TOKEN_FLOATING_CONST;
 }
 
+static inline
+bool cc_token_type_is_storage_class_specifier(const enum cc_token_type this)
+{
+	return (this == CC_TOKEN_AUTO ||
+			this == CC_TOKEN_CONST_EXPR ||
+			this == CC_TOKEN_EXTERN ||
+			this == CC_TOKEN_REGISTER ||
+			this == CC_TOKEN_STATIC ||
+			this == CC_TOKEN_THREAD_LOCAL ||
+			this == CC_TOKEN_TYPE_DEF);
+}
+
+static inline
+bool cc_token_type_is_type_specifier(const enum cc_token_type this)
+{
+	return (this == CC_TOKEN_VOID ||
+			this == CC_TOKEN_CHAR ||
+			this == CC_TOKEN_SHORT ||
+			this == CC_TOKEN_INT ||
+			this == CC_TOKEN_LONG ||
+			this == CC_TOKEN_FLOAT ||
+			this == CC_TOKEN_DOUBLE ||
+			this == CC_TOKEN_SIGNED ||
+			this == CC_TOKEN_UNSIGNED ||
+			this == CC_TOKEN_BIT_INT ||
+			this == CC_TOKEN_BOOL ||
+			this == CC_TOKEN_COMPLEX ||
+			this == CC_TOKEN_DECIMAL_32 ||
+			this == CC_TOKEN_DECIMAL_64 ||
+			this == CC_TOKEN_DECIMAL_128 ||
+			this == CC_TOKEN_ATOMIC ||
+			this == CC_TOKEN_STRUCT ||
+			this == CC_TOKEN_UNION ||
+			this == CC_TOKEN_ENUM ||
+			this == CC_TOKEN_TYPE_OF ||
+			this == CC_TOKEN_TYPE_OF_UNQUAL ||
+			this == CC_TOKEN_IDENTIFIER);
+}
+
+static inline
+bool cc_token_type_is_type_qualifier(const enum cc_token_type this)
+{
+	return (this == CC_TOKEN_CONST ||
+			this == CC_TOKEN_RESTRICT ||
+			this == CC_TOKEN_VOLATILE ||
+			this == CC_TOKEN_ATOMIC);
+}
+
+static inline
+bool cc_token_type_is_alignment_specifier(const enum cc_token_type this)
+{
+	return this == CC_TOKEN_ALIGN_AS;
+}
+
+static inline
+bool cc_token_type_is_function_specifier(const enum cc_token_type this)
+{
+	return this == CC_TOKEN_INLINE || this == CC_TOKEN_NO_RETURN;
+}
+/*****************************************************************************/
 struct cc_token {
 	enum cc_token_type	type;
 
@@ -148,7 +208,37 @@ bool cc_token_is_number(const struct cc_token *this)
 {
 	return cc_token_type_is_number(cc_token_type(this));
 }
-void cc_token_delete(void *this);
+
+static inline
+bool cc_token_is_storage_class_specifier(const struct cc_token *this)
+{
+	return cc_token_type_is_storage_class_specifier(cc_token_type(this));
+}
+
+static inline
+bool cc_token_is_type_specifier(const struct cc_token *this)
+{
+	return cc_token_type_is_type_specifier(cc_token_type(this));
+}
+
+static inline
+bool cc_token_is_type_qualifier(const struct cc_token *this)
+{
+	return cc_token_type_is_type_qualifier(cc_token_type(this));
+}
+
+static inline
+bool cc_token_is_alignment_specifier(const struct cc_token *this)
+{
+	return cc_token_type_is_alignment_specifier(cc_token_type(this));
+}
+
+static inline
+bool cc_token_is_function_specifier(const struct cc_token *this)
+{
+	return cc_token_type_is_function_specifier(cc_token_type(this));
+}
+void	cc_token_delete(void *this);
 /*****************************************************************************/
 struct cc_token_stream {
 	const char	*buffer;	/* file containing the cpp_tokens */
@@ -195,6 +285,66 @@ void cc_token_stream_empty(struct cc_token_stream *this)
 	ptrq_empty(&this->q);
 }
 /*****************************************************************************/
+/* Only relevant for identfiers */
+enum cc_linkage_type {
+	CC_LINKAGE_NONE,
+	CC_LINKAGE_EXTERNAL,
+	CC_LINKAGE_INTERNAL,
+};
+
+/* Only relevant for identfiers */
+enum cc_name_space_type {
+	CC_NAME_SPACE_LABEL,		/* Within a function */
+	CC_NAME_SPACE_TAG,		/* struct/union/enum */
+	CC_NAME_SPACE_MEMBER,	/* struct/union */
+	CC_NAME_SPACE_ATTRIBUTE_PREFIXES,	/* + std. attr */
+	CC_NAME_SPACE_ATTRIBUTE_PREFIXED_ATTRIBUTE,
+	CC_NAME_SPACE_ORDINARY,
+};
+
+struct cc_symbol_table;
+struct cc_node_identifier {
+	/*
+	 * This is the cpp's resolved name. i.e. any esc-seqs in the original src
+	 * were resolved to the corresponding src-char-set-encoded byte stream
+	 * (src-char-set is assume to be utf-8.) That stream is stored here.
+	 *
+	 * If the identifier is a key-word, this is NULL.
+	 */
+	const char	*string;
+	size_t		string_len;	/* len doesn't include the terminating nul */
+
+	/*
+	 * file/global scope
+	 * block scope (includes functionbody)
+	 * func-prototype scope (for both func decl and def)
+	 */
+	struct cc_symbol_table	*scope;
+
+	/* storage duration of the object that this identifier locates. */
+	enum cc_token_type		storage;
+	enum cc_linkage_type	linkage;
+	enum cc_name_space_type	name_space;
+};
+
+struct cc_node_string_literal {
+	/* exec-char-set representation */
+	const char	*string;
+	size_t		string_len;	/* len doesn't include the terminating nul */
+};
+
+struct cc_node_char_const {
+	/* exec-char-set representation */
+	const char	*string;
+	size_t		string_len;	/* len doesn't include the terminating nul */
+};
+
+struct cc_node_number {
+	/* literal */
+	const char	*string;
+	size_t		string_len;	/* len doesn't include the terminating nul */
+};
+
 struct cc_type;
 struct cc_node {
 	struct ptr_tree		tree;	/* rooted at this node */
@@ -207,26 +357,18 @@ struct cc_node {
 	 */
 
 	/*
-	 * For identifiers, this is the cpp's resolved name. i.e. any esc-seqs in
-	 * the original src were resolved to the corresponding src-char-set-encoded
-	 * byte stream (src-char-set is assume to be utf-8.)
-	 * That stream is stored here.
-	 *
-	 * For string-literals and char-consts, this is their exec-char-set
-	 * representation.
-	 *
-	 * For numbers too.
-	 *
-	 * For keywords and punctuators it is null.
-	 */
-	const char	*string;
-	size_t		string_len;	/* doesn't include the nul char */
-
-	/*
 	 * For e.g. a node of type CC_NODE_PLUS (binary +) will report the
 	 * type of addition here (int, char, float, bit-int, etc).
+	 * For statements and other constructs, the type is void, represented
+	 * by a out_type == NULL.
 	 */
 	struct cc_type		*out_type;
+	union {
+		struct cc_node_identifier		identifier;
+		struct cc_node_string_literal	string_literal;
+		struct cc_node_char_const		char_const;
+		struct cc_node_number			number;
+	} u;
 };
 
 static void cc_node_delete(void *p);
@@ -235,9 +377,7 @@ static inline
 void cc_node_init(struct cc_node *this)
 {
 	this->type = CC_TOKEN_INVALID;
-	this->string = NULL;
 	this->out_type = NULL;
-	this->string_len = 0;
 	ptrt_init(&this->tree, cc_node_delete);
 }
 
@@ -245,6 +385,13 @@ static inline
 enum cc_token_type cc_node_type(const struct cc_node *this)
 {
 	return this->type;
+}
+
+static inline
+err_t cc_node_add_tail_child(struct cc_node *this,
+							 struct cc_node *child)
+{
+	return ptrt_add_tail_child(&this->tree, child);
 }
 
 static inline
@@ -373,6 +520,7 @@ struct cc_type_enumeration {
 /*
  * struct/union tag is part of symbol table.
  * These have name-type pairs for members.
+ * the cc_type_type differentiates b/w struct and union.
  */
 struct cc_type_struct_union {
 	struct ptr_queue	names;		/* cc_node * */
@@ -394,20 +542,28 @@ struct cc_type {
 	} u;
 };
 /*****************************************************************************/
-/* sym-tab stores name-type pairs for object, funcs, types, typedefs. */
+/*
+ * sym-tab stores name-type pairs for objects, funcs, typedefs. It also stores
+ * the type-tree for each root type.
+ */
 enum cc_symbol_table_entry_type {
 	CC_SYMBOL_TABLE_ENTRY_INVALID,
 	CC_SYMBOL_TABLE_ENTRY_OBJECT,
 	CC_SYMBOL_TABLE_ENTRY_FUNCTION,
 	CC_SYMBOL_TABLE_ENTRY_TYPE_DEF,
-	CC_SYMBOL_TABLE_ENTRY_TYPE,
+	CC_SYMBOL_TABLE_ENTRY_TYPE_TREE,
+	/*
+	 * the last enum-const represents an entire type-tree rooted at some root
+	 * type. For e.g. rooted at 'int', or 'struct abc'.
+	 */
 };
 
 struct cc_symbol_table_entry {
-	struct cc_token	*identifier;
+	struct cc_node	*name;
 	enum cc_symbol_table_entry_type	type;
 	union {
-		struct cc_type	*type;
+		struct cc_type	*type;	/* For objects and funcs */
+		struct cc_type	*root;	/* Only for _TYPE_TREE */
 		struct cc_symbol_table_entry	*target;	/* type-def's target */
 	} u;
 };
@@ -420,6 +576,22 @@ cc_symbol_table_entry_type(const struct cc_symbol_table_entry *this)
 	return this->type;
 }
 
+/*
+ * A sym-tab implicitly denotes a scope, as each scope needs its own
+ * sym-tab, even if empty.
+ *
+ * There is one file-scope (i.e. global symbol table) for the translation unit.
+ * Each func-prototype has its own sym-tab that defines the func-prototype
+ * scope.
+ *
+ * The function body will have two sym-tabs:
+ *	- a block-level sym-tab for the func-body. This sym-tab points back to the
+ *	  func-prototype sym-tab.
+ *	- a func-level sym-tab for labels.
+ *
+ * All other identifiers have their scope determined by placement of their
+ * declaration.
+ */
 struct cc_symbol_table {
 	struct ptr_tree		tree;
 	struct ptr_queue	entries;
@@ -429,7 +601,7 @@ static void cc_symbol_table_delete(void *p);
 static inline
 void cc_symbol_table_init(struct cc_symbol_table *this)
 {
-	ptrt_init(&this->tree, cc_symbol_table_entry_delete);
+	ptrt_init(&this->tree, cc_symbol_table_delete);
 	ptrq_init(&this->entries, cc_symbol_table_entry_delete);
 }
 
@@ -441,8 +613,8 @@ err_t cc_symbol_table_add_entry(struct cc_symbol_table *this,
 }
 /*****************************************************************************/
 struct compiler {
-	struct cc_node	root;		/* root of the ast */
-	struct cc_symbol_table	symbols;	/* root of the sym-tab-tree */
+	struct cc_node	*root;				/* root of the ast */
+	struct cc_symbol_table	*symbols;	/* root of the sym-tab-tree */
 
 	int	cpp_tokens_fd;
 	const char	*cpp_tokens_path;
