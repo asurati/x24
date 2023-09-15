@@ -207,45 +207,53 @@ void cc_type_delete(void *p)
 }
 /*****************************************************************************/
 static
-void cc_symbol_table_entry_delete(void *p)
+void cc_symtab_entry_delete(void *p)
 {
-	struct cc_symbol_table_entry *this = p;
-	cc_node_delete(this->name);
-	if (cc_symbol_table_entry_type(this) == CC_SYMBOL_TABLE_ENTRY_TYPE_TREE)
-		cc_type_delete(this->u.root);
+	struct cc_symtab_entry *this = p;
+	cc_node_delete(this->symbol);
+	/* TODO */
 	free(this);
 }
 /*****************************************************************************/
 static
-err_t cc_symbol_table_find(const struct cc_symbol_table *this,
-						   const char *name,
-						   struct ptr_queue *out)
+err_t cc_symtab_find_typedef(struct cc_symtab *this,
+							 const char *name,
+							 struct ptr_queue *out)	/* init by caller */
 {
-	int i;
-	const struct cc_symbol_table_entry *ste;
-	const struct cc_node *node;
+	int i, num_entries;
+	err_t err;
+	struct cc_symtab_entry *ste;
+	struct cc_node *node;
+	enum cc_name_space_type name_space = CC_NAME_SPACE_ORDINARY;
+	/* type-def-names are in ordinary name-space */
 
-	/*
-	 * If an entry for a particular name-space is already added, do not add
-	 * another entry for that same name-space. This happens only when we
-	 * move up the sym-tab-tree. Within a single sym-tab (i.e. scope), there is
-	 * never a duplicate entry with the same name and name-space.
-	 */
+	num_entries = 0;
 	while (this) {
-		PTRQ_FOR_EACH(&this->entries, i, ste) {
-			node = ste->name;
-			if (cc_node_strcmp(node, name))
+		PTRQ_FOR_EACH(&this->entries[name_space], i, ste) {
+			node = ste->symbol;
+			if (node->string == NULL)
 				continue;
+			if (strcmp(node->string, name))
+				continue;
+			err = ptrq_add_tail(out, ste);
+			if (err)
+				return err;
+			++num_entries;
 		}
-		this = ptrt_parent(this);
+		this = ptrt_parent(&this->tree);
 	}
+	if (num_entries == 0)
+		return ENOENT;
+	return ESUCCESS;
 }
 
 static
-void cc_symbol_table_delete(void *p)
+void cc_symtab_delete(void *p)
 {
-	struct cc_symbol_table *this = p;
-	ptrq_empty(&this->entries);
+	int i;
+	struct cc_symtab *this = p;
+	for (i = 0; i < CC_NAME_SPACE_MAX; ++i)
+		ptrq_empty(&this->entries[i]);
 	ptrt_empty(&this->tree);
 	free(this);
 }
@@ -256,18 +264,16 @@ err_t compiler_build_types(struct compiler *this)
 	int i;
 	char *str;
 	struct cc_node	*node;
-	struct cc_node_identifier *ident;
-	struct cc_symbol_table_entry *ste;
-	struct cc_type *type;
-	static const enum cc_type_type codes[] = {	/* same order as below */
-		CC_TYPE_BOOL,
-		CC_TYPE_CHAR,
-		CC_TYPE_SHORT,
-		CC_TYPE_INT,
-		CC_TYPE_LONG,
-		CC_TYPE_LONG_LONG,
+	struct cc_symtab_entry *ste;
+	static const enum cc_token_type types[] = {
+		CC_TOKEN_BOOL,
+		CC_TOKEN_CHAR,
+		CC_TOKEN_SHORT,
+		CC_TOKEN_INT,
+		CC_TOKEN_LONG,
+		CC_TOKEN_IDENTIFIER,	/* 'long long' isn't a single token. */
 	};
-	static const struct cc_type_integer types[] = {	/* unqualified types. */
+	static const struct cc_symtab_entry_integer ints[] = {
 		{8, 1, 7, 8, false},	/* bool */
 		{8, 7, 0, 8, true},		/* char */
 		{16, 15, 0, 16, true},	/* short */
@@ -282,55 +288,27 @@ err_t compiler_build_types(struct compiler *this)
 	 * all 'signed', hence they do not need an extra 'signed' child.
 	 */
 	for (i = 0; i < (int)ARRAY_SIZE(types); ++i) {
-		ste = malloc(sizeof(*ste));
 		node = malloc(sizeof(*node));
-		type = malloc(sizeof(*type));
-		if (type == NULL || ste == NULL || node == NULL)
+		ste = malloc(sizeof(*ste));
+		if (ste == NULL || node == NULL)
 			return ENOMEM;
-
 		cc_node_init(node);
-		node->out_type = type;
-		ident = &node->u.identifier;
-		ident->string = NULL;
-		ident->string_len = 0;
-		ident->scope = this->symbols;
-		ident->storage = CC_TOKEN_INVALID;	/* types are not objects */
-		ident->linkage = CC_LINKAGE_EXTERNAL;
-		ident->name_space = CC_NAME_SPACE_ORDINARY;
-
-		/* key-words are also identifiers */
-		switch (codes[i]) {
-		case CC_TYPE_BOOL:
-			node->type = CC_TOKEN_BOOL; break;
-		case CC_TYPE_CHAR:
-			node->type = CC_TOKEN_CHAR; break;
-		case CC_TYPE_SHORT:
-			node->type = CC_TOKEN_SHORT; break;
-		case CC_TYPE_INT:
-			node->type = CC_TOKEN_INT; break;
-		case CC_TYPE_LONG:
-			node->type = CC_TOKEN_LONG; break;
-		case CC_TYPE_LONG_LONG:
-			/*
-			 * There's no keyword 'long long', although the corresponding type
-			 * is a root type.
-			 */
-			node->type = CC_TOKEN_IDENTIFIER;
-			ident->string = str = malloc(strlen("long long") + 1);
+		node->type = types[i];
+		node->out_type = ste;	/* Points to self */
+		if (node->type == CC_TOKEN_IDENTIFIER) {
+			node->string = str = malloc(strlen("long long") + 1);
 			if (str == NULL)
 				return ENOMEM;
 			strcpy(str, "long long");
-			break;
-		default:
-			assert(0);
-			return EINVAL;
 		}
-		type->type = codes[i];
-		memcpy(&type->u.integer, &types[i], sizeof(types[i]));
-		ste->name = node;
-		ste->type = CC_SYMBOL_TABLE_ENTRY_TYPE_TREE;
-		ste->u.root = type;
-		err = cc_symbol_table_add_entry(this->symbols, ste);
+		ste->parent = this->symbols;
+		ste->symbol = node;
+		ste->type = CC_SYMTAB_ENTRY_INTEGER;
+		ste->linkage = CC_LINKAGE_NONE;		/* types have no linkages */
+		ste->storage = CC_TOKEN_INVALID;	/* types have no stroage durn */
+		ste->name_space = CC_NAME_SPACE_ORDINARY;
+		memcpy(&ste->u.integer, &ints[i], sizeof(ints[i]));
+		err = cc_symtab_add_entry(this->symbols, ste);
 		if (err)
 			return err;
 	}
@@ -383,7 +361,7 @@ err_t compiler_new(const char *path,
 		err = ENOMEM;
 		goto err1;
 	}
-	cc_symbol_table_init(this->symbols);
+	cc_symtab_init(this->symbols);
 	err = compiler_build_types(this);
 	if (err)
 		goto err1;
@@ -411,7 +389,7 @@ err_t compiler_delete(struct compiler *this)
 {
 	assert(this);
 	cc_node_delete(&this->root);
-	cc_symbol_table_delete(&this->symbols);
+	cc_symtab_delete(&this->symbols);
 	free(this);
 	return ESUCCESS;
 }
@@ -903,7 +881,7 @@ err_t compiler_parse_declaration_specifiers(struct compiler *this,
 	int num_type_specifiers;
 	struct ptr_queue stes;
 	enum cc_token_type type;
-	const struct cc_symbol_table_entry *ste;
+	const struct cc_symtab_entry *ste;
 	struct cc_node *specifiers;
 	struct cc_token_stream *stream;
 	struct cc_token *token;
@@ -937,32 +915,15 @@ err_t compiler_parse_declaration_specifiers(struct compiler *this,
 		 */
 		type = cc_token_type(token);
 
-		/* A TypeSpecifier, if it is a TypedefName. Else, break. */
 		if (type == CC_TOKEN_IDENTIFIER) {
-			/*
-			 * Search in the sym-tabs to see if this identifier matches with
-			 * a TypedefName. If it does, continue. If not, break.
-			 */
+			/* Should be a TypedefName. If not, break */
 			ptrq_init(&stes, NULL);
-			err = cc_symbol_table_find(this->symbols, cc_token_string(token),
-									   &stes);
+			err = cc_symtab_find_typedef(this->symbols, cc_token_string(token),
+										 &stes);
 			if (err == ENOENT)
 				break;
 			if (err)
 				return err;
-
-			/*
-			 * There may be multiple entries, due to different name-spaces.
-			 * outer-scope entries hidden by an inner-scope are not* returned.
-			 */
-			PTRQ_FOR_EACH_WITH_REMOVE(&stes, ste) {
-				if (cc_symbol_table_entry_type(ste) ==
-					CC_SYMBOL_TABLE_ENTRY_TYPE_DEF)
-					break;
-			}
-			/* If not a type-def-name, break */
-			if (ste == NULL)
-				break;
 
 			/*
 			 * Found a type-specifier. If there already is a type-specifier,

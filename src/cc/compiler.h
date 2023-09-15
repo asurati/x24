@@ -285,67 +285,7 @@ void cc_token_stream_empty(struct cc_token_stream *this)
 	ptrq_empty(&this->q);
 }
 /*****************************************************************************/
-/* Only relevant for identfiers */
-enum cc_linkage_type {
-	CC_LINKAGE_NONE,
-	CC_LINKAGE_EXTERNAL,
-	CC_LINKAGE_INTERNAL,
-};
-
-/* Only relevant for identfiers */
-enum cc_name_space_type {
-	CC_NAME_SPACE_LABEL,		/* Within a function */
-	CC_NAME_SPACE_TAG,		/* struct/union/enum */
-	CC_NAME_SPACE_MEMBER,	/* struct/union */
-	CC_NAME_SPACE_ATTRIBUTE_PREFIXES,	/* + std. attr */
-	CC_NAME_SPACE_ATTRIBUTE_PREFIXED_ATTRIBUTE,
-	CC_NAME_SPACE_ORDINARY,
-};
-
-struct cc_symbol_table;
-struct cc_node_identifier {
-	/*
-	 * This is the cpp's resolved name. i.e. any esc-seqs in the original src
-	 * were resolved to the corresponding src-char-set-encoded byte stream
-	 * (src-char-set is assume to be utf-8.) That stream is stored here.
-	 *
-	 * If the identifier is a key-word, this is NULL.
-	 */
-	const char	*string;
-	size_t		string_len;	/* len doesn't include the terminating nul */
-
-	/*
-	 * file/global scope
-	 * block scope (includes functionbody)
-	 * func-prototype scope (for both func decl and def)
-	 */
-	struct cc_symbol_table	*scope;
-
-	/* storage duration of the object that this identifier locates. */
-	enum cc_token_type		storage;
-	enum cc_linkage_type	linkage;
-	enum cc_name_space_type	name_space;
-};
-
-struct cc_node_string_literal {
-	/* exec-char-set representation */
-	const char	*string;
-	size_t		string_len;	/* len doesn't include the terminating nul */
-};
-
-struct cc_node_char_const {
-	/* exec-char-set representation */
-	const char	*string;
-	size_t		string_len;	/* len doesn't include the terminating nul */
-};
-
-struct cc_node_number {
-	/* literal */
-	const char	*string;
-	size_t		string_len;	/* len doesn't include the terminating nul */
-};
-
-struct cc_type;
+struct cc_symtab_entry;
 struct cc_node {
 	struct ptr_tree		tree;	/* rooted at this node */
 	enum cc_token_type	type;
@@ -357,18 +297,24 @@ struct cc_node {
 	 */
 
 	/*
+	 * For string-literals and char-consts, this is in exec-char-set.
+	 * For numbers, it is in src-char-set.
+	 * For keywords, it is null.
+	 * For identifiers, it is cpp's resolved name. i.e. any esc-seqs in the
+	 * original src were resolved to the corresponding src-char-set-encoded
+	 * byte stream (src-char-set is assume to be utf-8.) That stream is stored
+	 * here.
+	 */
+	const char	*string;
+	size_t		string_len;	/* len doesn't include the terminating nul */
+
+	/*
 	 * For e.g. a node of type CC_NODE_PLUS (binary +) will report the
 	 * type of addition here (int, char, float, bit-int, etc).
 	 * For statements and other constructs, the type is void, represented
 	 * by a out_type == NULL.
 	 */
-	struct cc_type		*out_type;
-	union {
-		struct cc_node_identifier		identifier;
-		struct cc_node_string_literal	string_literal;
-		struct cc_node_char_const		char_const;
-		struct cc_node_number			number;
-	} u;
+	struct cc_symtab_entry	*out_type;
 };
 
 static void cc_node_delete(void *p);
@@ -378,6 +324,8 @@ void cc_node_init(struct cc_node *this)
 {
 	this->type = CC_TOKEN_INVALID;
 	this->out_type = NULL;
+	this->string = NULL;
+	this->string_len = 0;
 	ptrt_init(&this->tree, cc_node_delete);
 }
 
@@ -430,46 +378,71 @@ bool cc_node_is_number(const struct cc_node *this)
 	return cc_token_type_is_number(cc_node_type(this));
 }
 /*****************************************************************************/
-enum cc_type_type {
-	CC_TYPE_INVALID,
+/*
+ * sym-tab stores information about each identifier declared.
+ * The declaration of each identifier determines its scope. The constructs
+ * surrounding the identifier determine its name-space.
+ */
+enum cc_name_space_type {
+	CC_NAME_SPACE_LABELS,
+	CC_NAME_SPACE_STRUCT_TAGS,
+	CC_NAME_SPACE_UNION_TAGS,
+	CC_NAME_SPACE_ENUM_TAGS,
+	CC_NAME_SPACE_MEMBERS,
+	CC_NAME_SPACE_ORDINARY,
+	CC_NAME_SPACE_STD_ATTRS,
+	CC_NAME_SPACE_ATTR_PREFIXES,
+	CC_NAME_SPACE_ATTR_PREFIXED_ATTRS,
+	CC_NAME_SPACE_MAX
+};
 
-	CC_TYPE_BOOL,	/* is always unsigned */
+enum cc_linkage_type {
+	CC_LINKAGE_NONE,
+	CC_LINKAGE_EXTERNAL,
+	CC_LINKAGE_INTERNAL,
+};
 
-	CC_TYPE_SIGNED_CHAR,	/* char and signed char are different */
+enum cc_symtab_entry_type {
+	CC_SYMTAB_ENTRY_INVALID,
 
-	CC_TYPE_CHAR,	/* These are always signed */
-	CC_TYPE_SHORT,
-	CC_TYPE_INT,
-	CC_TYPE_LONG,
-	CC_TYPE_LONG_LONG,
-	CC_TYPE_BIT_INT,
-	CC_TYPE_BIT_FIELD,
+	CC_SYMTAB_ENTRY_TYPE_DEF,
 
-	CC_TYPE_FLOAT,
-	CC_TYPE_DOUBLE,
-	CC_TYPE_LONG_DOUBLE,
-	CC_TYPE_DECIMAL_32,
-	CC_TYPE_DECIMAL_64,
-	CC_TYPE_DECIMAL_128,
-	CC_TYPE_COMPLEX,
+	/* Various types */
+#if 0
+	CC_SYMTAB_ENTRY_FLOAT,
+	CC_SYMTAB_ENTRY_DOUBLE,
+	CC_SYMTAB_ENTRY_LONG_DOUBLE,
+	CC_SYMTAB_ENTRY_DECIMAL_32,
+	CC_SYMTAB_ENTRY_DECIMAL_64,
+	CC_SYMTAB_ENTRY_DECIMAL_128,
+	CC_SYMTAB_ENTRY_COMPLEX,
+#endif
+	CC_SYMTAB_ENTRY_INTEGER,		/* int types */
+	CC_SYMTAB_ENTRY_BIT_INT,
+	CC_SYMTAB_ENTRY_BIT_FIELD,
+	CC_SYMTAB_ENTRY_SIGNED,
+	CC_SYMTAB_ENTRY_UNSIGNED,
 
-	CC_TYPE_ENUMERATION,
-	CC_TYPE_STRUCTURE,
-	CC_TYPE_UNION,
-	CC_TYPE_ARRAY,
-	CC_TYPE_POINTER,
-	CC_TYPE_FUNCTION,
-	CC_TYPE_VOID,
-	CC_TYPE_ATOMIC,
+	CC_SYMTAB_ENTRY_ENUMERATION,	/* other types */
+	CC_SYMTAB_ENTRY_STRUCTURE,
+	CC_SYMTAB_ENTRY_UNION,
+	CC_SYMTAB_ENTRY_ARRAY,
+	CC_SYMTAB_ENTRY_POINTER,
+	CC_SYMTAB_ENTRY_FUNCTION,
+	CC_SYMTAB_ENTRY_VOID,
 
-	/* qualifiers to qualify type take the same form as type */
-	CC_TYPE_QUALIFIER_CONST,
-	CC_TYPE_QUALIFIER_RESTRICT,
-	CC_TYPE_QUALIFIER_VOLATILE,
-	CC_TYPE_QUALIFIER_ATOMIC,
+	/* qualifiers to qualify type take the same form as others */
+	CC_SYMTAB_ENTRY_CONST,
+	CC_SYMTAB_ENTRY_RESTRICT,
+	CC_SYMTAB_ENTRY_VOLATILE,
+	CC_SYMTAB_ENTRY_ATOMIC,
 
-	/* Non-grammatical. Make unsigned a qualifier */
-	/* CC_TYPE_QUALIFIER_UNSIGNED, */
+	CC_SYMTAB_ENTRY_OBJECT,
+};
+
+struct cc_symtab_entry_typedef {
+	/* The entry of the target type of this typedef */
+	struct cc_symtab_entry	*type;
 };
 
 /*
@@ -479,7 +452,7 @@ enum cc_type_type {
  * When an ast-node for alignof(int), for e.g., is build, the node's out_type
  * is set to size_t, as alignof() returns its value in size_t type.
  */
-struct cc_type_integer {
+struct cc_symtab_entry_integer {
 	int		width;		/* in bits. padding + value + sign */
 	int		precision;	/* in bits. value bits */
 	int		padding;	/* in bits. */
@@ -487,134 +460,96 @@ struct cc_type_integer {
 	bool	is_signed;
 };
 
-struct cc_type_bit_field {
-	struct cc_type	*type;	/* The underlying type int or bool */
+struct cc_symtab_entry_bit_field {
+	struct cc_symtab_entry	*type;	/* Underlying type: int/bool */
 	int width;
 	int	offset;
 };
 
-struct cc_type_pointer {
-	struct cc_type		*referenced_type;
+struct cc_symtab_entry_pointer {
+	struct cc_symtab_entry	*type;	/* The referenced type */
 };
 
-/* Dont care about names of func/params */
-struct cc_type_function {
-	struct cc_type		*return_type;
-	struct ptr_queue	parameter_types;
-};
-
-struct cc_type_array {
-	struct cc_type	*element_type;
-	int		num_elements;	/* Should it be a cc_node? */
+struct cc_symtab_entry_array {
+	struct cc_symtab_entry	*type;	/* The element type */
+	int		num_elements;	/* TODO: type of index? */
 	bool	is_vla;
 };
 
-/* enum tag is part of symbol table. */
-struct cc_type_enumeration {
-	struct cc_type		*type;	/* type of the values */
-	struct ptr_queue	names;		/* cc_node * */
-	struct ptr_queue	values;	/* cc_node * */
-	bool	is_type_fixed;
+/* Used for both struct/union. Enum has the same symtab as entry.parent */
+struct cc_symtab_entry_struct {
+	struct cc_symtab	*symbols;
 };
 
-/*
- * struct/union tag is part of symbol table.
- * These have name-type pairs for members.
- * the cc_type_type differentiates b/w struct and union.
- */
-struct cc_type_struct_union {
-	struct ptr_queue	names;		/* cc_node * */
-	struct ptr_queue	types;		/* cc_type * */
+/* Used for both func-decl and func-defn */
+struct cc_symtab_entry_function {
+	struct cc_symtab_entry	*prev;	/* Previous declaration, if any */
+	struct cc_symtab_entry	*type;	/* The return type */
+	struct cc_symtab		*symbols;	/* Parameters. Names may be null */
 };
 
-/* There is a tree per type */
-struct cc_type {
-	struct ptr_tree		tree;
-	enum cc_type_type	type;
+struct cc_symtab_entry_object {
+	struct cc_symtab_entry	*type;
+};
+
+struct cc_symtab_entry {
+	struct cc_symtab	*parent;	/* The table containing this entry */
+	struct cc_node		*symbol;	/* an identifier */
+	enum cc_symtab_entry_type	type;
+	enum cc_linkage_type	linkage;
+	enum cc_token_type		storage;
+	enum cc_name_space_type	name_space;
 	union {
-		struct cc_type_integer		integer;
-		struct cc_type_bit_field	bit_field;
-		struct cc_type_function		function;
-		struct cc_type_array		array;
-		struct cc_type_pointer		pointer;
-		struct cc_type_enumeration	enumeration;
-		struct cc_type_struct_union	struct_union;
+		struct cc_symtab_entry_typedef		type_def;
+		struct cc_symtab_entry_integer		integer;
+		struct cc_symtab_entry_bit_field	bit_field;
+		struct cc_symtab_entry_pointer		pointer;
+		struct cc_symtab_entry_array		array;
+		struct cc_symtab_entry_struct		struct_union;
+		struct cc_symtab_entry_function		function;
+		struct cc_symtab_entry_object		object;
 	} u;
 };
-/*****************************************************************************/
-/*
- * sym-tab stores name-type pairs for objects, funcs, typedefs. It also stores
- * the type-tree for each root type.
- */
-enum cc_symbol_table_entry_type {
-	CC_SYMBOL_TABLE_ENTRY_INVALID,
-	CC_SYMBOL_TABLE_ENTRY_OBJECT,
-	CC_SYMBOL_TABLE_ENTRY_FUNCTION,
-	CC_SYMBOL_TABLE_ENTRY_TYPE_DEF,
-	CC_SYMBOL_TABLE_ENTRY_TYPE_TREE,
-	/*
-	 * the last enum-const represents an entire type-tree rooted at some root
-	 * type. For e.g. rooted at 'int', or 'struct abc'.
-	 */
-};
-
-struct cc_symbol_table_entry {
-	struct cc_node	*name;
-	enum cc_symbol_table_entry_type	type;
-	union {
-		struct cc_type	*type;	/* For objects and funcs */
-		struct cc_type	*root;	/* Only for _TYPE_TREE */
-		struct cc_symbol_table_entry	*target;	/* type-def's target */
-	} u;
-};
-static void cc_symbol_table_entry_delete(void *p);
+static void cc_symtab_entry_delete(void *p);
 
 static inline
-enum cc_symbol_table_entry_type
-cc_symbol_table_entry_type(const struct cc_symbol_table_entry *this)
+enum cc_symtab_entry_type
+cc_symtab_entry_type(const struct cc_symtab_entry *this)
 {
 	return this->type;
 }
 
 /*
- * A sym-tab implicitly denotes a scope, as each scope needs its own
- * sym-tab, even if empty.
- *
- * There is one file-scope (i.e. global symbol table) for the translation unit.
- * Each func-prototype has its own sym-tab that defines the func-prototype
- * scope.
- *
- * The function body will have two sym-tabs:
- *	- a block-level sym-tab for the func-body. This sym-tab points back to the
- *	  func-prototype sym-tab.
- *	- a func-level sym-tab for labels.
- *
- * All other identifiers have their scope determined by placement of their
- * declaration.
+ * The entries are divided into 6 name-spaces. Not all name-spaces are
+ * valid for a given scope. For e.g., for file or global
+ * scope, the members and labels queue must be empty.
  */
-struct cc_symbol_table {
-	struct ptr_tree		tree;
-	struct ptr_queue	entries;
+struct cc_symtab {
+	struct ptr_tree		tree;	/* parent == NULL => file/global scope */
+	struct ptr_queue	entries[CC_NAME_SPACE_MAX];
 };
-static void cc_symbol_table_delete(void *p);
+static void cc_symtab_delete(void *p);
 
 static inline
-void cc_symbol_table_init(struct cc_symbol_table *this)
+void cc_symtab_init(struct cc_symtab *this)
 {
-	ptrt_init(&this->tree, cc_symbol_table_delete);
-	ptrq_init(&this->entries, cc_symbol_table_entry_delete);
+	int i;
+	ptrt_init(&this->tree, cc_symtab_delete);
+	for (i = 0; i < CC_NAME_SPACE_MAX; ++i)
+		ptrq_init(&this->entries[i], cc_symtab_entry_delete);
 }
 
 static inline
-err_t cc_symbol_table_add_entry(struct cc_symbol_table *this,
-								struct cc_symbol_table_entry *entry)
+err_t cc_symtab_add_entry(struct cc_symtab *this,
+						  struct cc_symtab_entry *entry)
 {
-	return ptrq_add_tail(&this->entries, entry);
+	enum cc_name_space_type ns = entry->name_space;
+	return ptrq_add_tail(&this->entries[ns], entry);
 }
 /*****************************************************************************/
 struct compiler {
-	struct cc_node	*root;				/* root of the ast */
-	struct cc_symbol_table	*symbols;	/* root of the sym-tab-tree */
+	struct cc_node		*root;		/* root of the ast */
+	struct cc_symtab	*symbols;	/* root of the sym-tab-tree */
 
 	int	cpp_tokens_fd;
 	const char	*cpp_tokens_path;
