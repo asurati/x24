@@ -3,7 +3,7 @@
 /* vim: set noet ts=4 sts=4 sw=4: */
 
 #include <inc/cpp/scanner.h>
-#include <inc/cc/compiler.h>
+#include <inc/cc/parser.h>
 #include <inc/types.h>
 
 #include <assert.h>
@@ -15,7 +15,7 @@ int main(int argc, char **argv)
 	err_t err;
 	const char *path;
 	struct scanner *scanner;
-	struct compiler *compiler;
+	struct parser *parser;
 
 	if (argc != 2) {
 		printf("Usage: %s path.to.src.c\n", argv[0]);
@@ -29,7 +29,7 @@ int main(int argc, char **argv)
 	err = scanner_scan(scanner, argv[1]);
 	if (err)
 		goto err1;
-	path = scanner_cpp_tokens_path(scanner);
+	path = scanner_cpp_tokens_path(scanner);	/* path owned by scanner */
 	assert(path);
 	path = strdup(path);
 	if (path == NULL) {
@@ -38,14 +38,14 @@ int main(int argc, char **argv)
 	}
 	scanner_delete(scanner);
 	scanner = NULL;
-	err = compiler_new(path, &compiler);	/* path owned by compiler */
+	err = parser_new(path, &parser);	/* path owned by parser */
 	if (err)
 		goto err1;
-	err = compiler_compile(compiler);
+	err = parser_parse_tokens(parser);
 	goto err2;
 err2:
-	if (compiler)
-		compiler_delete(compiler);
+	if (parser)
+		parser_delete(parser);
 err1:
 	if (scanner)
 		scanner_delete(scanner);

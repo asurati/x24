@@ -2,11 +2,12 @@
 /* Copyright (c) 2023 Amol Surati */
 /* vim: set noet ts=4 sts=4 sw=4: */
 
-#ifndef SRC_CC_COMPILER_H
-#define SRC_CC_COMPILER_H
+#ifndef SRC_CC_PARSER_H
+#define SRC_CC_PARSER_H
 
-#include <inc/cc/compiler.h>
+#include <inc/cc/parser.h>
 
+#include <inc/bits.h>
 #include <inc/types.h>
 
 /*
@@ -19,6 +20,91 @@ enum cc_token_type {
 #include <inc/cc/tokens.h>	/* grammar non-terminals */
 #undef DEF
 };
+
+#define CC_ALIGNMENT_SPECIFIER_ALIGN_AS_POS		0
+#define CC_ALIGNMENT_SPECIFIER_ALIGN_AS_BITS	1
+
+#define CC_STORAGE_CLASS_SPECIFIER_AUTO_POS			0
+#define CC_STORAGE_CLASS_SPECIFIER_CONST_EXPR_POS	1
+#define CC_STORAGE_CLASS_SPECIFIER_EXTERN_POS		2
+#define CC_STORAGE_CLASS_SPECIFIER_REGISTER_POS		3
+#define CC_STORAGE_CLASS_SPECIFIER_STATIC_POS		4
+#define CC_STORAGE_CLASS_SPECIFIER_THREAD_LOCAL_POS	5
+#define CC_STORAGE_CLASS_SPECIFIER_TYPE_DEF_POS		6
+#define CC_STORAGE_CLASS_SPECIFIER_AUTO_BITS		1
+#define CC_STORAGE_CLASS_SPECIFIER_CONST_EXPR_BITS	1
+#define CC_STORAGE_CLASS_SPECIFIER_EXTERN_BITS		1
+#define CC_STORAGE_CLASS_SPECIFIER_REGISTER_BITS	1
+#define CC_STORAGE_CLASS_SPECIFIER_STATIC_BITS		1
+#define CC_STORAGE_CLASS_SPECIFIER_THREAD_LOCAL_BITS	1
+#define CC_STORAGE_CLASS_SPECIFIER_TYPE_DEF_BITS		1
+
+#define CC_FUNCTION_SPECIFIER_INLINE_POS		0
+#define CC_FUNCTION_SPECIFIER_NO_RETURN_POS		1
+#define CC_FUNCTION_SPECIFIER_INLINE_BITS		1
+#define CC_FUNCTION_SPECIFIER_NO_RETURN_BITS	1
+
+#define CC_TYPE_QUALIFIER_CONST_POS		0
+#define CC_TYPE_QUALIFIER_RESTRICT_POS	1
+#define CC_TYPE_QUALIFIER_VOLATILE_POS	2
+#define CC_TYPE_QUALIFIER_ATOMIC_POS	3
+#define CC_TYPE_QUALIFIER_CONST_BITS	1
+#define CC_TYPE_QUALIFIER_RESTRICT_BITS	1
+#define CC_TYPE_QUALIFIER_VOLATILE_BITS	1
+#define CC_TYPE_QUALIFIER_ATOMIC_BITS	1
+
+#define CC_TYPE_SPECIFIER_VOID_POS				0
+#define CC_TYPE_SPECIFIER_CHAR_POS				1
+#define CC_TYPE_SPECIFIER_SHORT_POS				2
+#define CC_TYPE_SPECIFIER_INT_POS				3
+#define CC_TYPE_SPECIFIER_LONG_0_POS			4
+#define CC_TYPE_SPECIFIER_LONG_1_POS			5
+#define CC_TYPE_SPECIFIER_FLOAT_POS				6
+#define CC_TYPE_SPECIFIER_DOUBLE_POS			7
+#define CC_TYPE_SPECIFIER_SIGNED_POS			8
+#define CC_TYPE_SPECIFIER_UNSIGNED_POS			9
+#define CC_TYPE_SPECIFIER_BIT_INT_POS			10
+#define CC_TYPE_SPECIFIER_BOOL_POS				11
+#define CC_TYPE_SPECIFIER_COMPLEX_POS			12
+#define CC_TYPE_SPECIFIER_DECIMAL_32_POS		13
+#define CC_TYPE_SPECIFIER_DECIMAL_64_POS		14		
+#define CC_TYPE_SPECIFIER_DECIMAL_128_POS		15
+#define CC_TYPE_SPECIFIER_ATOMIC_POS			16
+#define CC_TYPE_SPECIFIER_STRUCT_POS			17
+#define CC_TYPE_SPECIFIER_UNION_POS				18
+#define CC_TYPE_SPECIFIER_ENUM_POS				19
+#define CC_TYPE_SPECIFIER_TYPE_DEF_NAME_POS		20
+#define CC_TYPE_SPECIFIER_TYPE_OF_POS			21
+#define CC_TYPE_SPECIFIER_TYPE_OF_UNQUAL_POS	22
+#define CC_TYPE_SPECIFIER_VOID_BITS				1
+#define CC_TYPE_SPECIFIER_CHAR_BITS				1
+#define CC_TYPE_SPECIFIER_SHORT_BITS			1
+#define CC_TYPE_SPECIFIER_INT_BITS				1
+#define CC_TYPE_SPECIFIER_LONG_0_BITS			1
+#define CC_TYPE_SPECIFIER_LONG_1_BITS			1
+#define CC_TYPE_SPECIFIER_FLOAT_BITS			1
+#define CC_TYPE_SPECIFIER_DOUBLE_BITS			1
+#define CC_TYPE_SPECIFIER_SIGNED_BITS			1
+#define CC_TYPE_SPECIFIER_UNSIGNED_BITS			1
+#define CC_TYPE_SPECIFIER_BIT_INT_BITS			1
+#define CC_TYPE_SPECIFIER_BOOL_BITS				1
+#define CC_TYPE_SPECIFIER_COMPLEX_BITS			1
+#define CC_TYPE_SPECIFIER_DECIMAL_32_BITS		1
+#define CC_TYPE_SPECIFIER_DECIMAL_64_BITS		1		
+#define CC_TYPE_SPECIFIER_DECIMAL_128_BITS		1
+#define CC_TYPE_SPECIFIER_ATOMIC_BITS			1
+#define CC_TYPE_SPECIFIER_STRUCT_BITS			1
+#define CC_TYPE_SPECIFIER_UNION_BITS			1
+#define CC_TYPE_SPECIFIER_ENUM_BITS				1
+#define CC_TYPE_SPECIFIER_TYPE_DEF_NAME_BITS	1
+#define CC_TYPE_SPECIFIER_TYPE_OF_BITS			1
+#define CC_TYPE_SPECIFIER_TYPE_OF_UNQUAL_BITS	1
+
+typedef	int	cc_type_specifiers_t;
+typedef	int	cc_type_qualifiers_t;
+typedef	int	cc_function_specifiers_t;
+typedef	int	cc_alignment_specifiers_t;
+typedef	int	cc_storage_class_specifiers_t;
 
 static inline
 bool cc_token_type_is_terminal(const enum cc_token_type this)
@@ -271,14 +357,14 @@ err_t cc_token_stream_add_tail(struct cc_token_stream *this,
 {
 	return ptrq_add_tail(&this->q, token);
 }
-
+#endif
 static inline
 err_t cc_token_stream_add_head(struct cc_token_stream *this,
 							   struct cc_token *token)
 {
 	return ptrq_add_head(&this->q, token);
 }
-#endif
+
 static inline
 void cc_token_stream_empty(struct cc_token_stream *this)
 {
@@ -316,7 +402,6 @@ struct cc_node {
 	 */
 	struct cc_symtab_entry	*out_type;
 };
-
 static void cc_node_delete(void *p);
 
 static inline
@@ -547,7 +632,7 @@ err_t cc_symtab_add_entry(struct cc_symtab *this,
 	return ptrq_add_tail(&this->entries[ns], entry);
 }
 /*****************************************************************************/
-struct compiler {
+struct parser {
 	struct cc_node		*root;		/* root of the ast */
 	struct cc_symtab	*symbols;	/* root of the sym-tab-tree */
 
@@ -555,4 +640,10 @@ struct compiler {
 	const char	*cpp_tokens_path;
 	struct cc_token_stream	stream;
 };
+
+static inline
+struct cc_token_stream *parser_token_stream(struct parser *this)
+{
+	return &this->stream;
+}
 #endif

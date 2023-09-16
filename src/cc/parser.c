@@ -2,7 +2,7 @@
 /* Copyright (c) 2023 Amol Surati */
 /* vim: set noet ts=4 sts=4 sw=4: */
 
-#include "compiler.h"
+#include "parser.h"
 
 #include <inc/unicode.h>
 
@@ -20,145 +20,233 @@
 /* From src/cpp/lexer.c */
 extern const char *g_key_words[];
 extern const char *g_punctuators[];
-/*****************************************************************************/
-struct cc_storage_class_specifiers {
-	int	auto_specifier;
-	int	constexpr_specifier;
-	int	extern_specifier;
-	int	register_specifier;
-	int	static_specifier;
-	int	thread_local_specifier;
-	int	typedef_specifier;
-};
-
-static inline
-void cc_storage_class_specifiers_incr(struct cc_storage_class_specifiers *this,
-									  const enum cc_token_type type)
-{
-	switch (type) {
-	case CC_TOKEN_AUTO:			++this->auto_specifier; break;
-	case CC_TOKEN_CONST_EXPR:	++this->constexpr_specifier; break;
-	case CC_TOKEN_EXTERN:		++this->extern_specifier; break;
-	case CC_TOKEN_REGISTER:		++this->register_specifier; break;
-	case CC_TOKEN_STATIC:		++this->static_specifier; break;
-	case CC_TOKEN_THREAD_LOCAL:	++this->thread_local_specifier; break;
-	case CC_TOKEN_TYPE_DEF:		++this->typedef_specifier; break;
-	default:	assert(0); break;
-	}
-}
-/*****************************************************************************/
-struct cc_function_specifiers {
-	int	inline_specifier;
-	int	noreturn_specifier;
-};
-
-static inline
-void cc_function_specifiers_incr(struct cc_function_specifiers *this,
-								 const enum cc_token_type type)
-{
-	switch (type) {
-	case CC_TOKEN_INLINE:		++this->inline_specifier; break;
-	case CC_TOKEN_NO_RETURN:	++this->noreturn_specifier; break;
-	default:	assert(0); break;
-	}
-}
-/*****************************************************************************/
-struct cc_type_qualifiers {
-	int const_qualifier;
-	int	restrict_qualifier;
-	int	volatile_qualifier;
-	int	atomic_qualifier;
-};
-
-static inline
-void cc_type_qualifiers_incr(struct cc_type_qualifiers *this,
-							 const enum cc_token_type type)
-{
-	switch (type) {
-	case CC_TOKEN_CONST:	++this->const_qualifier; break;
-	case CC_TOKEN_RESTRICT:	++this->restrict_qualifier; break;
-	case CC_TOKEN_VOLATILE:	++this->volatile_qualifier; break;
-	case CC_TOKEN_ATOMIC:	++this->atomic_qualifier; break;
-	default:	assert(0); break;
-	}
-}
-/*****************************************************************************/
-struct cc_type_specifiers {
-	int	void_specifier;
-	int	char_specifier;
-	int	short_specifier;
-	int	int_specifier;
-	int	long_specifier;
-	int	float_specifier;
-	int	double_specifier;
-	int	signed_specifier;
-	int	unsigned_specifier;
-	int	bit_int_specifier;
-	int	bool_specifier;
-	int	complex_specifier;
-	int	decimal_32_specifier;
-	int	decimal_64_specifier;
-	int	decimal_128_specifier;
-	int	atomic_specifier;
-	int	struct_specifier;
-	int	union_specifier;
-	int	enum_specifier;
-	int	typedef_name_specifier;
-	int	typeof_specifier;
-	int	typeof_unqual_specifier;
-	int	alignas_specifier;
-};
-
-static inline
-void cc_type_specifiers_incr(struct cc_type_specifiers *this,
-							 const enum cc_token_type type)
-{
-	switch (type) {
-	case CC_TOKEN_VOID:				++this->void_specifier; break;
-	case CC_TOKEN_CHAR:				++this->char_specifier; break;
-	case CC_TOKEN_SHORT:			++this->short_specifier; break;
-	case CC_TOKEN_INT:				++this->int_specifier; break;
-	case CC_TOKEN_LONG:				++this->long_specifier; break;
-	case CC_TOKEN_FLOAT:			++this->float_specifier; break;
-	case CC_TOKEN_DOUBLE:			++this->double_specifier; break;
-	case CC_TOKEN_SIGNED:			++this->signed_specifier; break;
-	case CC_TOKEN_UNSIGNED:			++this->unsigned_specifier; break;
-	case CC_TOKEN_BIT_INT:			++this->bit_int_specifier; break;
-	case CC_TOKEN_BOOL:				++this->bool_specifier; break;
-	case CC_TOKEN_COMPLEX:			++this->complex_specifier; break;
-	case CC_TOKEN_DECIMAL_32:		++this->decimal_32_specifier; break;
-	case CC_TOKEN_DECIMAL_64:		++this->decimal_64_specifier; break;
-	case CC_TOKEN_DECIMAL_128:		++this->decimal_128_specifier; break;
-	case CC_TOKEN_ATOMIC:			++this->atomic_specifier; break;
-	case CC_TOKEN_STRUCT:			++this->struct_specifier; break;
-	case CC_TOKEN_UNION:			++this->union_specifier; break;
-	case CC_TOKEN_ENUM:				++this->enum_specifier; break;
-	case CC_TOKEN_IDENTIFIER:		++this->typedef_name_specifier; break;
-	case CC_TOKEN_TYPE_OF:			++this->typeof_specifier; break;
-	case CC_TOKEN_TYPE_OF_UNQUAL:	++this->typeof_unqual_specifier; break;
-	case CC_TOKEN_ALIGN_AS:			++this->alignas_specifier; break;
-	default:	assert(0); break;
-	}
-}
-/*****************************************************************************/
-/*
- * If *out is non-NULL, then it is the parent of the construct being currently
- * parsed. If *out is NULL, then the construct being parsed must create itself
- * and return it.
- */
-static
-err_t compiler_parse(struct compiler *this,
-					 const enum cc_token_type type,
-					 struct cc_node *in[],
-					 struct cc_node **out);
-/*****************************************************************************/
 static const char *g_cc_token_type_str[] = {
 #define DEF(t)	"CC_TOKEN_" # t,
 #include <inc/cpp/tokens.h>
 #include <inc/cc/tokens.h>
 #undef DEF
 };
+/*****************************************************************************/
+//static
+err_t cc_storage_class_specifiers_add(cc_storage_class_specifiers_t *this,
+									  const enum cc_token_type type)
+{
+	cc_storage_class_specifiers_t ts = *this;
 
+	if (type == CC_TOKEN_THREAD_LOCAL) {
+		/* Can't have more than one */
+		if (bits_get(ts, CC_STORAGE_CLASS_SPECIFIER_THREAD_LOCAL))
+			return EINVAL;
+		/* thread_local can be used with static/extern */
+		ts &= bits_off(CC_STORAGE_CLASS_SPECIFIER_STATIC);
+		ts &= bits_off(CC_STORAGE_CLASS_SPECIFIER_EXTERN);
+		if (ts)
+			return EINVAL;
+		*this |= bits_on(CC_STORAGE_CLASS_SPECIFIER_THREAD_LOCAL);
+		return ESUCCESS;
+	}
+
+	if (type == CC_TOKEN_AUTO) {
+		/* Can't have more than one */
+		if (bits_get(ts, CC_STORAGE_CLASS_SPECIFIER_AUTO))
+			return EINVAL;
+		/* auto can be used with all except typedef */
+		if (bits_get(ts, CC_STORAGE_CLASS_SPECIFIER_TYPE_DEF))
+			return EINVAL;
+		*this |= bits_on(CC_STORAGE_CLASS_SPECIFIER_AUTO);
+		return ESUCCESS;
+	}
+
+	if (type == CC_TOKEN_CONST_EXPR) {
+		/* Can't have more than one */
+		if (bits_get(ts, CC_STORAGE_CLASS_SPECIFIER_CONST_EXPR))
+			return EINVAL;
+		/* const-expr can be used with auto/register/static */
+		ts &= bits_off(CC_STORAGE_CLASS_SPECIFIER_AUTO);
+		ts &= bits_off(CC_STORAGE_CLASS_SPECIFIER_REGISTER);
+		ts &= bits_off(CC_STORAGE_CLASS_SPECIFIER_STATIC);
+		if (ts)
+			return EINVAL;
+		*this |= bits_on(CC_STORAGE_CLASS_SPECIFIER_CONST_EXPR);
+		return ESUCCESS;
+	}
+	assert(0);	/* TODO */
+	return EINVAL;
+}
+
+//static
+err_t cc_type_qualifiers_add(cc_type_qualifiers_t *this,
+							 const enum cc_token_type type)
+{
+	if (type == CC_TOKEN_CONST)
+		*this |= bits_on(CC_TYPE_QUALIFIER_CONST);
+	else if (type == CC_TOKEN_RESTRICT)
+		*this |= bits_on(CC_TYPE_QUALIFIER_RESTRICT);
+	else if (type == CC_TOKEN_VOLATILE)
+		*this |= bits_on(CC_TYPE_QUALIFIER_VOLATILE);
+	else if (type == CC_TOKEN_ATOMIC)
+		*this |= bits_on(CC_TYPE_QUALIFIER_ATOMIC);
+	else
+		return EINVAL;
+	return ESUCCESS;
+}
+
+//static
+err_t cc_type_specifiers_add(cc_type_specifiers_t *this,
+							 const enum cc_token_type type)
+{
+	cc_type_specifiers_t ts = *this;
+
+	if (type == CC_TOKEN_SIGNED ||
+		type == CC_TOKEN_UNSIGNED) {
+		/* Can't have the signedness more than once */
+		if (bits_get(ts, CC_TYPE_SPECIFIER_SIGNED) ||
+			bits_get(ts, CC_TYPE_SPECIFIER_UNSIGNED))
+			return EINVAL;
+		/* signed/unsigned can be used with char/short/int/long/bit-int */
+		ts &= bits_off(CC_TYPE_SPECIFIER_CHAR);
+		ts &= bits_off(CC_TYPE_SPECIFIER_SHORT);
+		ts &= bits_off(CC_TYPE_SPECIFIER_INT);
+		ts &= bits_off(CC_TYPE_SPECIFIER_LONG_0);
+		ts &= bits_off(CC_TYPE_SPECIFIER_LONG_1);
+		ts &= bits_off(CC_TYPE_SPECIFIER_BIT_INT);
+		if (ts)
+			return EINVAL;
+		if (type == CC_TOKEN_SIGNED)
+			*this |= bits_on(CC_TYPE_SPECIFIER_SIGNED);
+		else
+			*this |= bits_on(CC_TYPE_SPECIFIER_UNSIGNED);
+		return ESUCCESS;
+	}
+
+	if (type == CC_TOKEN_CHAR) {
+		/* Can't have more than one chars */
+		if (bits_get(ts, CC_TYPE_SPECIFIER_CHAR))
+			return EINVAL;
+		/* char can be used with signed/unsigned */
+		ts &= bits_off(CC_TYPE_SPECIFIER_SIGNED);
+		ts &= bits_off(CC_TYPE_SPECIFIER_UNSIGNED);
+		if (ts)
+			return EINVAL;
+		*this |= bits_on(CC_TYPE_SPECIFIER_CHAR);
+		return ESUCCESS;
+	}
+
+	if (type == CC_TOKEN_SHORT) {
+		/* Can't have more than one short */
+		if (bits_get(ts, CC_TYPE_SPECIFIER_SHORT))
+			return EINVAL;
+		/* short can be used with int/signed/unsigned */
+		ts &= bits_off(CC_TYPE_SPECIFIER_INT);
+		ts &= bits_off(CC_TYPE_SPECIFIER_SIGNED);
+		ts &= bits_off(CC_TYPE_SPECIFIER_UNSIGNED);
+		if (ts)
+			return EINVAL;
+		*this |= bits_on(CC_TYPE_SPECIFIER_SHORT);
+	}
+
+	if (type == CC_TOKEN_INT) {
+		/* Can't have more than one ints */
+		if (bits_get(ts, CC_TYPE_SPECIFIER_INT))
+			return EINVAL;
+		/* int can be used with long/short/signed/unsigned */
+		ts &= bits_off(CC_TYPE_SPECIFIER_LONG_0);
+		ts &= bits_off(CC_TYPE_SPECIFIER_LONG_1);
+		ts &= bits_off(CC_TYPE_SPECIFIER_SHORT);
+		ts &= bits_off(CC_TYPE_SPECIFIER_SIGNED);
+		ts &= bits_off(CC_TYPE_SPECIFIER_UNSIGNED);
+		if (ts)
+			return EINVAL;
+		*this |= bits_on(CC_TYPE_SPECIFIER_INT);
+		return ESUCCESS;
+	}
+
+	if (type == CC_TOKEN_LONG) {
+		/* Can't have more than 2 longs */
+		if (bits_get(ts, CC_TYPE_SPECIFIER_LONG_0) &&
+			bits_get(ts, CC_TYPE_SPECIFIER_LONG_1))
+			return EINVAL;
+		/* long can be used with int/long/signed/unsigned */
+		ts &= bits_off(CC_TYPE_SPECIFIER_LONG_0);
+		ts &= bits_off(CC_TYPE_SPECIFIER_LONG_1);
+		ts &= bits_off(CC_TYPE_SPECIFIER_INT);
+		ts &= bits_off(CC_TYPE_SPECIFIER_SIGNED);
+		ts &= bits_off(CC_TYPE_SPECIFIER_UNSIGNED);
+		if (ts)
+			return EINVAL;
+		ts = *this;
+		if (!bits_get(ts, CC_TYPE_SPECIFIER_LONG_0))
+			*this |= bits_on(CC_TYPE_SPECIFIER_LONG_0);
+		else
+			*this |= bits_on(CC_TYPE_SPECIFIER_LONG_1);
+		return ESUCCESS;
+	}
+
+	if (type == CC_TOKEN_BIT_INT) {
+		/* Can't have more than one */
+		if (bits_get(ts, CC_TYPE_SPECIFIER_BIT_INT))
+			return EINVAL;
+		/* bit-int can be used with signed/unsigned */
+		ts &= bits_off(CC_TYPE_SPECIFIER_SIGNED);
+		ts &= bits_off(CC_TYPE_SPECIFIER_UNSIGNED);
+		if (ts)
+			return EINVAL;
+		*this |= bits_on(CC_TYPE_SPECIFIER_BIT_INT);
+	}
+
+	if (type == CC_TOKEN_BOOL) {
+		/* Can't have more than one */
+		if (bits_get(ts, CC_TYPE_SPECIFIER_BOOL))
+			return EINVAL;
+		/* bool can't be used with others */
+		if (ts)
+			return EINVAL;
+		*this |= bits_on(CC_TYPE_SPECIFIER_BOOL);
+		return ESUCCESS;
+	}
+
+	if (type == CC_TOKEN_STRUCT) {
+		/* Can't have more than one */
+		if (bits_get(ts, CC_TYPE_SPECIFIER_STRUCT))
+			return EINVAL;
+		/* Can't be used with others */
+		if (ts)
+			return EINVAL;
+		*this |= bits_on(CC_TYPE_SPECIFIER_STRUCT);
+		return ESUCCESS;
+	}
+
+	if (type == CC_TOKEN_UNION) {
+		/* Can't have more than one */
+		if (bits_get(ts, CC_TYPE_SPECIFIER_UNION))
+			return EINVAL;
+		/* Can't be used with others */
+		if (ts)
+			return EINVAL;
+		*this |= bits_on(CC_TYPE_SPECIFIER_UNION);
+		return ESUCCESS;
+	}
+
+	if (type == CC_TOKEN_ENUM) {
+		/* Can't have more than one */
+		if (bits_get(ts, CC_TYPE_SPECIFIER_ENUM))
+			return EINVAL;
+		/* Can't be used with others */
+		if (ts)
+			return EINVAL;
+		*this |= bits_on(CC_TYPE_SPECIFIER_ENUM);
+		return ESUCCESS;
+	}
+	assert(0);	/* TODO */
+	return EINVAL;
+}
+/*****************************************************************************/
+static
+err_t parser_parse(struct parser *this,
+				   const enum cc_token_type type,
+				   struct cc_node *in[],
+				   struct cc_node **out);
+/*****************************************************************************/
 void cc_token_delete(void *p)
 {
 	struct cc_token *this = p;
@@ -258,7 +346,7 @@ void cc_symtab_delete(void *p)
 	free(this);
 }
 /*****************************************************************************/
-err_t compiler_build_types(struct compiler *this)
+err_t parser_build_types(struct parser *this)
 {
 	err_t err;
 	int i;
@@ -288,12 +376,10 @@ err_t compiler_build_types(struct compiler *this)
 	 * all 'signed', hence they do not need an extra 'signed' child.
 	 */
 	for (i = 0; i < (int)ARRAY_SIZE(types); ++i) {
-		node = malloc(sizeof(*node));
+		node = cc_node_new(types[i]);
 		ste = malloc(sizeof(*ste));
 		if (ste == NULL || node == NULL)
 			return ENOMEM;
-		cc_node_init(node);
-		node->type = types[i];
 		node->out_type = ste;	/* Points to self */
 		if (node->type == CC_TOKEN_IDENTIFIER) {
 			node->string = str = malloc(strlen("long long") + 1);
@@ -315,14 +401,14 @@ err_t compiler_build_types(struct compiler *this)
 	return err;
 }
 
-err_t compiler_new(const char *path,
-				   struct compiler **out)
+err_t parser_new(const char *path,
+				 struct parser **out)
 {
 	err_t err;
 	int fd, ret;
 	const char *buffer;
 	size_t size;
-	struct compiler *this;
+	struct parser *this;
 	struct stat stat;
 
 	err = ESUCCESS;
@@ -362,7 +448,7 @@ err_t compiler_new(const char *path,
 		goto err1;
 	}
 	cc_symtab_init(this->symbols);
-	err = compiler_build_types(this);
+	err = parser_build_types(this);
 	if (err)
 		goto err1;
 	cc_token_stream_init(&this->stream, buffer, size);
@@ -375,7 +461,7 @@ err0:
 }
 
 static
-void compiler_cleanup0(struct compiler *this)
+void parser_cleanup0(struct parser *this)
 {
 	assert(this);
 	munmap((void *)this->stream.buffer, this->stream.buffer_size);
@@ -385,7 +471,7 @@ void compiler_cleanup0(struct compiler *this)
 	cc_token_stream_empty(&this->stream);
 }
 
-err_t compiler_delete(struct compiler *this)
+err_t parser_delete(struct parser *this)
 {
 	assert(this);
 	cc_node_delete(&this->root);
@@ -764,8 +850,8 @@ err_t cc_token_stream_remove_head(struct cc_token_stream *this,
 }
 /*****************************************************************************/
 static
-err_t compiler_parse_translation_unit(struct compiler *this,
-									  struct cc_node **out)
+err_t parser_parse_translation_unit(struct parser *this,
+									struct cc_node **out)
 {
 	err_t err;
 	enum cc_token_type type;
@@ -779,7 +865,7 @@ err_t compiler_parse_translation_unit(struct compiler *this,
 	/* Parse array of ExternalDeclaration */
 	type = CC_TOKEN_EXTERNAL_DECLARATION;
 	while (true) {
-		err = compiler_parse(this, type, &root, NULL);
+		err = parser_parse(this, type, &root, NULL);
 		if (err)
 			break;
 	}
@@ -788,10 +874,10 @@ err_t compiler_parse_translation_unit(struct compiler *this,
 		*out = root;
 	return err;
 }
-
+/*****************************************************************************/
 static
-err_t compiler_parse_external_declaration(struct compiler *this,
-										  struct cc_node *in[])
+err_t parser_parse_external_declaration(struct parser *this,
+										struct cc_node *in[])
 {
 	err_t err;
 	enum cc_token_type type;
@@ -815,26 +901,25 @@ err_t compiler_parse_external_declaration(struct compiler *this,
 	if (err)
 		return err;
 	if (cc_token_type(token) == CC_TOKEN_STATIC_ASSERT) {
-		type = CC_TOKEN_STATIC_ASSERT_DECLARATION;
 		/*
 		 * Since we want to store the StaticAssertDeclarationn within
 		 * TranslationUnit, pass TranslationUnit as the parent.
 		 */
-		return compiler_parse(this, type, in, NULL);
+		type = CC_TOKEN_STATIC_ASSERT_DECLARATION;
+		return parser_parse(this, type, in, NULL);
 	}
 
 	/* Is it an AttributeDeclaration? */
 	attributes = NULL;
 	if (cc_token_type(token) == CC_TOKEN_LEFT_BRACKET) {
 		type = CC_TOKEN_ATTRIBUTE_SPECIFIER_SEQUENCE;
-		err = compiler_parse(this, type, NULL, &attributes);
+		err = parser_parse(this, type, NULL, &attributes);
 		if (!err)
 			err = cc_token_stream_peek_head(stream, &token);
 		if (!err && cc_token_type(token) == CC_TOKEN_SEMI_COLON) {
 			err = cc_token_stream_remove_head(stream, &token);
 			assert(err == ESUCCESS);
 			cc_token_delete(token);
-
 			/* The type is still AttributeSpecifierSequence. Change it. */
 			attributes->type = CC_TOKEN_ATTRIBUTE_DECLARATION;
 			return cc_node_add_tail_child(parent, attributes);
@@ -844,20 +929,36 @@ err_t compiler_parse_external_declaration(struct compiler *this,
 		assert(attributes);
 	}
 
-	/* Is it a FunctionDefinition. */
+	/*
+	 * Scan DeclarationSpecifiers first. If error, return err.
+	 * If a semi-colon follows, then this is Declaration.
+	 * Else, scan one Declarator. If error, return err.
+	 * If a left-brace follows, then this is a FunctionDefinition.
+	 * Else it is a Declaration.
+	 */
 	specifiers = declarator = definition = declaration = NULL;
 	type = CC_TOKEN_DECLARATION_SPECIFIERS;
-	err = compiler_parse(this, type, NULL, &specifiers);
-	if (!err) {
-		type = CC_TOKEN_DECLARATOR;
-		err = compiler_parse(this, type, NULL, &declarator);
-	}
+	err = parser_parse(this, type, NULL, &specifiers);
+	if (err)
+		return err;
+	err = cc_token_stream_peek_head(stream, &token);
 	if (err)
 		return err;
 
 	nodes[0] = parent;		/* TranslationUnit */
 	nodes[1] = attributes;	/* may be null */
 	nodes[2] = specifiers;
+	nodes[3] = NULL;
+	if (cc_token_type(token) == CC_TOKEN_SEMI_COLON) {
+		type = CC_TOKEN_DECLARATION;
+		return parser_parse(this, type, nodes, NULL);
+	}
+	if (!err) {
+		type = CC_TOKEN_DECLARATOR;
+		err = parser_parse(this, type, NULL, &declarator);
+	}
+	if (err)
+		return err;
 	nodes[3] = declarator;
 	nodes[4] = NULL;
 	err = cc_token_stream_peek_head(stream, &token);
@@ -870,37 +971,35 @@ err_t compiler_parse_external_declaration(struct compiler *this,
 	 * We want the parser to store the Declaration/FunctionDefinition directly
 	 * into the parent (TranslationUnit). So no need for out.
 	 */
-	return compiler_parse(this, type, nodes, NULL);
+	return parser_parse(this, type, nodes, NULL);
 }
-
+/*****************************************************************************/
 static
-err_t compiler_parse_declaration_specifiers(struct compiler *this,
-											struct cc_node **out)
+err_t parser_parse_declaration_specifiers(struct parser *this,
+										  struct cc_node **out)
 {
 	err_t err;
-	int num_type_specifiers;
+	bool is_specifier;
+	const char *str;
 	struct ptr_queue stes;
 	enum cc_token_type type;
 	const struct cc_symtab_entry *ste;
 	struct cc_node *specifiers;
 	struct cc_token_stream *stream;
 	struct cc_token *token;
-	struct cc_storage_class_specifiers scs = {0};
-	struct cc_function_specifiers fs = {0};
-	struct cc_type_qualifiers tq = {0};
-	struct cc_type_specifiers ts = {0};
 
-	assert(*out == NULL);	/* No parent. Create ourselves and return */
+	/* No parent. Create ourselves and return in *out */
 
 	/*
 	 * array of DeclarationSpecifier elements, each element optionally followed
-	 * by AttributeSpecifierSequence. Check errors too.
+	 * by AttributeSpecifierSequence.
 	 */
-	stream = &this->stream;
+	ptrq_init(&stes, NULL);
+	stream = parser_token_stream(this);
 	specifiers = cc_node_new(CC_TOKEN_DECLARATION_SPECIFIERS);
 	if (specifiers == NULL)
 		return ENOMEM;
-	num_type_specifiers = 0;
+	cc_node_init(specifiers);
 	token = NULL;
 	while (true) {
 		/* We do not expect an error, not even an EOF */
@@ -908,201 +1007,181 @@ err_t compiler_parse_declaration_specifiers(struct compiler *this,
 		if (err)
 			return err;
 
-		/*
-		 * StorageClassSpecifiers, TypeQualifiers, and FunctionSpecifiers are
-		 * keywords. Some TypeSpecifiers are compound constructs.
-		 * bit-int,atomic,struct,union,enum,typeof need more processing
-		 */
-		type = cc_token_type(token);
+		is_specifier = false;
+		if (cc_token_is_type_specifier(token) ||
+			cc_token_is_type_qualifier(token) ||
+			cc_token_is_alignment_specifier(token) ||
+			cc_token_is_storage_class_specifier(token) ||
+			cc_token_is_function_specifier(token))
+			is_specifier = true;
+		if (!is_specifier)
+			break;
 
-		if (type == CC_TOKEN_IDENTIFIER) {
+		/* Determine if this (non-keyword) Identifier is a TypedefName */
+		if (cc_token_type(token) == CC_TOKEN_IDENTIFIER) {
 			/* Should be a TypedefName. If not, break */
-			ptrq_init(&stes, NULL);
-			err = cc_symtab_find_typedef(this->symbols, cc_token_string(token),
-										 &stes);
+			str = cc_token_string(token);
+			err = cc_symtab_find_typedef(this->symbols, str, &stes);
 			if (err == ENOENT)
-				break;
+				break;	/* Not a TypedefName */
 			if (err)
 				return err;
-
-			/*
-			 * Found a type-specifier. If there already is a type-specifier,
-			 * raise an error.
-			 */
-			if (num_type_specifiers)
-				return EINVAL;
-			++num_type_specifiers;
-			cc_type_specifiers_incr(&ts, type);
-			err = cc_token_stream_remove_head(stream, &token);
-			assert(err == ESUCCESS);
-			cc_token_delete(token);
-
-			/* Empty the ste queue */
+			/* Free stes */
 			PTRQ_FOR_EACH_WITH_REMOVE(&stes, ste);
-			goto check_attributes;
+			/* this is indeed a TypedefName */
 		}
 
-		/* TypeSpecifiers */
-		if (type == CC_TOKEN_BIT_INT ||
-			type == CC_TOKEN_STRUCT ||
-			type == CC_TOKEN_UNION ||
-			type == CC_TOKEN_ENUM ||
-			type == CC_TOKEN_TYPE_OF ||
-			type == CC_TOKEN_TYPE_OF_UNQUAL) {
-			cc_type_specifiers_incr(&ts, type);
-			type = CC_TOKEN_DECLARATION_SPECIFIER;
-			err = compiler_parse(this, type, &specifiers, NULL);
-			if (err)
-				return err;
-			goto check_attributes;
-		}
+		type = CC_TOKEN_DECLARATION_SPECIFIER;
+		err = parser_parse(this, type, &specifiers, NULL);
+		if (err)
+			return err;
 
-		/* Belongs to either TypeQualifier, or TypeSpecifier */
-		if (type == CC_TOKEN_ATOMIC) {
-			err = cc_token_stream_peek_entry(stream, 1, &token);
-			if (!err && cc_token_type(token) == CC_TOKEN_LEFT_PAREN) {
-				/* TypeSpecifier, because _Atomic left-paren */
-				cc_type_specifiers_incr(&ts, type);
-				type = CC_TOKEN_DECLARATION_SPECIFIER;
-				err = compiler_parse(this, type, &specifiers, NULL);
-				if (err)
-					return err;
-				goto check_attributes;
-			}
-			/* Else just a qualifier, and not a full-fledged specifier */
-		}
-
-		/* All key-words only */
-		if (cc_token_is_storage_class_specifier(token))
-			cc_storage_class_specifiers_incr(&scs, type);
-		else if (cc_token_is_function_specifier(token))
-			cc_function_specifiers_incr(&fs, type);
-		else if (cc_token_is_type_qualifier(token))
-			cc_type_qualifiers_incr(&tq, type);
-		else if (cc_token_is_type_specifier(token))
-			cc_type_specifiers_incr(&ts, type);
-		else
-			break;	/* Something else */
-		err = cc_token_stream_remove_head(stream, &token);
-		assert(err == ESUCCESS);
-		cc_token_delete(token);
-check_attributes:
 		/* Does an AttributeSpecifierSequence follow? */
 		err = cc_token_stream_peek_head(stream, &token);
 		if (err || cc_token_type(token) != CC_TOKEN_LEFT_BRACKET)
 			continue;	/* no attrs follow */
-
 		type = CC_TOKEN_ATTRIBUTE_SPECIFIER_SEQUENCE;
-		err = compiler_parse(this, type, &specifiers, NULL);
+		err = parser_parse(this, type, &specifiers, NULL);
 		if (err)
 			return err;
 	}
 	assert(err == ESUCCESS);
-	/* TODO: Check if there are any errors in the specifiers. */
 	*out = specifiers;
 	return err;
 }
 
-/* Called only to parse compound declaration specifiers like bit-int etc. */
 static
-err_t compiler_parse_declaration_specifier(struct compiler *this,
-										   struct cc_node *in[])
+err_t parser_parse_declaration_specifier_bit_int(struct parser *this,
+												 struct cc_node *in[])
+{
+	assert(0);
+	(void)this;
+	(void)in;
+	return ENOTSUP;
+}
+
+static
+err_t parser_parse_declaration_specifier_struct(struct parser *this,
+												struct cc_node *in[])
+{
+	assert(0);
+	(void)this;
+	(void)in;
+	return ENOTSUP;
+}
+
+static
+err_t parser_parse_declaration_specifier_enum(struct parser *this,
+											  struct cc_node *in[])
+{
+	assert(0);
+	(void)this;
+	(void)in;
+	return ENOTSUP;
+}
+
+static
+err_t parser_parse_declaration_specifier_type_of(struct parser *this,
+												 struct cc_node *in[])
+{
+	assert(0);
+	(void)this;
+	(void)in;
+	return ENOTSUP;
+}
+
+static
+err_t parser_parse_declaration_specifier(struct parser *this,
+										 struct cc_node *in[])
 {
 	err_t err;
-	bool need_parse;
+	bool key_word;
 	enum cc_token_type type;
-	struct cc_node *specifiers, *specifier, *attributes, *parent;
+	struct cc_node *specifier, *parent;
 	struct cc_token_stream *stream;
-	struct cc_token *token;
+	struct cc_token *token, *t;
 
+	stream = parser_token_stream(this);
 	parent = in[0];
 	assert(parent);
 	assert(cc_node_type(parent) == CC_TOKEN_DECLARATION_SPECIFIERS);
 
-	need_parse = false;
 	err = cc_token_stream_remove_head(stream, &token);
 	assert(err == ESUCCESS);
 	type = cc_token_type(token);
-	/*
-	 * StorageClassSpecifiers, TypeQualifiers, and FunctionSpecifiers are
-	 * keywords. Some TypeSpecifiers compound constructs.
-	 */
-	if (cc_token_is_storage_class_specifier(token))
-		cc_storage_class_specifiers_incr(&scs, type);
-	else if (cc_token_is_type_qualifier(token))
-		cc_type_qualifiers_incr(&tq, type);
-	else if (cc_token_is_function_specifier(token))
-		cc_function_specifiers_incr(&fs, type);
-	else if (!cc_token_is_type_specifier(token))
-		break;
 
-	/* bit-int,atomic,struct,union,enum,typeof need more processing */
-	cc_token_delete(token);
-	token = NULL;
-	if (type == CC_TOKEN_BIT_INT) {
-		/* No change in type. Need parsing */
-		need_parse = true;
-		cc_type_specifiers_incr(&ts, type);
-	} else if (type == CC_TOKEN_ATOMIC) {
-		type = CC_TOKEN_ATOMIC_TYPE_SPECIFIER;
-		need_parse = true;
-		cc_type_specifiers_incr(&ts, type);
-	} else if (type == CC_TOKEN_STRUCT ||
-			   type == CC_TOKEN_UNION) {
-		type = CC_TOKEN_STRUCT_OR_UNION_SPECIFIER;
-		need_parse = true;
-		cc_type_specifiers_incr(&ts, type);
-	} else if (type == CC_TOKEN_ENUM) {
-		type = CC_TOKEN_ENUM_SPECIFIER;
-		need_parse = true;
-		cc_type_specifiers_incr(&ts, type);
-	} else if (type == CC_TOKEN_TYPE_OF) {
-		type = CC_TOKEN_TYPE_OF_SPECIFIER;
-		need_parse = true;
-		cc_type_specifiers_incr(&ts, type);
-	} else if (type == CC_TOKEN_TYPE_IDENTIFIER) {
-		/*
-		 * Check if the sym-tabs if this is a type-def-name.
-		 * If it is, then continue. If not, then break.
-		 */
-		cc_type_specifiers_incr(&ts, type);
-		/* No need for parsing */
-	} else {
-		cc_type_specifiers_incr(&ts, type);
-		/* No need for parsing */
+	key_word = true;
+	if (type == CC_TOKEN_ATOMIC) {
+		err = cc_token_stream_peek_head(stream, &t);
+		if (!err && cc_token_type(t) == CC_TOKEN_LEFT_PAREN)
+			key_word = false;
+	} else if (type == CC_TOKEN_BIT_INT ||
+			   type == CC_TOKEN_STRUCT ||
+			   type == CC_TOKEN_UNION ||
+			   type == CC_TOKEN_ENUM ||
+			   type == CC_TOKEN_TYPE_OF ||
+			   type == CC_TOKEN_TYPE_OF_UNQUAL) {
+		key_word = false;
 	}
 
-	if (need_parse)
-		err = compiler_parse(this, type, NULL, &specifier);
+	/* Single token specifiers/qualifiers */
+	if (key_word) {
+		specifier = cc_node_new(type);
+		if (specifier == NULL)
+			return ENOMEM;
+		specifier->string = cc_token_string(token);
+		specifier->string_len = cc_token_string_length(token);
+		cc_token_delete(token);
+		return cc_node_add_tail_child(parent, specifier);
+	}
 
+	err = cc_token_stream_add_head(stream, token);
+	if (err)
+		return err;
+	if (type == CC_TOKEN_BIT_INT)
+		return parser_parse_declaration_specifier_bit_int(this, in);
+	if (type == CC_TOKEN_ENUM)
+		return parser_parse_declaration_specifier_enum(this, in);
+	if (type == CC_TOKEN_STRUCT ||
+		type == CC_TOKEN_UNION)
+		return parser_parse_declaration_specifier_struct(this, in);
+	if (type == CC_TOKEN_TYPE_OF ||
+		type == CC_TOKEN_TYPE_OF_UNQUAL)
+		return parser_parse_declaration_specifier_type_of(this, in);
+	return EINVAL;
 }
 
 static
-err_t compiler_parse(struct compiler *this,
-					 const enum cc_token_type type,
-					 struct cc_node *in[],
-					 struct cc_node **out)
+err_t parser_parse(struct parser *this,
+				   const enum cc_token_type type,
+				   struct cc_node *in[],
+				   struct cc_node **out)
 {
 	err_t err;
 
 	switch (type) {
 	case CC_TOKEN_TRANSLATION_UNIT:
 		assert(in == NULL);
-		err = compiler_parse_translation_unit(this, out);
+		err = parser_parse_translation_unit(this, out);
 		break;
 	case CC_TOKEN_EXTERNAL_DECLARATION:
-		/* Must be the parent (TranslationUnit) */
-		assert(in[0]);
+		/* in[0] Must be the parent (TranslationUnit) */
+		assert(in);
 
 		/* Since the parent is passed in in[], no need to pass out */
 		assert(out == NULL);
-		err = compiler_parse_external_declaration(this, in);
+		err = parser_parse_external_declaration(this, in);
 		break;
 	case CC_TOKEN_DECLARATION_SPECIFIERS:
 		/* No need for a parent, but we do need out to be non-NULL */
 		assert(in == NULL);
 		assert(out);
-		err = compiler_parse_declaration_specifiers(this, out);
+		err = parser_parse_declaration_specifiers(this, out);
+		break;
+	case CC_TOKEN_DECLARATION_SPECIFIER:
+		assert(in);
+		assert(out == NULL);
+		err = parser_parse_declaration_specifier(this, in);
 		break;
 	default:
 		printf("%s: %s unsupported\n", __func__,
@@ -1125,14 +1204,11 @@ void cc_node_print(const struct cc_node *this)
 	 * non-null string field. The string is not nul terminated.
 	 */
 	printf("\n(");
-	if (cc_node_is_identifier(this) && ! cc_node_is_key_word(this))
-		printf("%s", this->u.identifier.string);
-	else if (cc_node_is_number(this))
-		printf("%s", this->u.number.string);
-	else if (cc_node_is_char_const(this))
-		printf("%s", this->u.char_const.string);
-	else if (cc_node_is_string_literal(this))
-		printf("%s", this->u.string_literal.string);
+	if ((cc_node_is_identifier(this) && !cc_node_is_key_word(this)) ||
+		cc_node_is_number(this) ||
+		cc_node_is_char_const(this) ||
+		cc_node_is_string_literal(this))
+		printf("%s", this->string);
 	else
 		printf("%s", &g_cc_token_type_str[this->type][strlen("CC_TOKEN_")]);
 	PTRT_FOR_EACH_CHILD(&this->tree, i, child)
@@ -1141,25 +1217,25 @@ void cc_node_print(const struct cc_node *this)
 }
 
 //static
-void compiler_print_ast(const struct compiler *this)
+void parser_print_ast(const struct parser *this)
 {
 	cc_node_print(this->root);
 }
 /*****************************************************************************/
-err_t compiler_compile(struct compiler *this)
+err_t parser_parse_tokens(struct parser *this)
 {
 	err_t err;
 	enum cc_token_type type;
 
 	type = CC_TOKEN_TRANSLATION_UNIT;
-	err = compiler_parse(this, type, NULL, &this->root);
+	err = parser_parse(this, type, NULL, &this->root);
 	if (!err)
-		compiler_cleanup0(this);
+		parser_cleanup0(this);
 #if 0
 	if (!err)
-		compiler_print_parse_tree(this);
+		parser_print_parse_tree(this);
 	if (false && !err)
-		err = compiler_visit_parse_tree(this);
+		err = parser_visit_parse_tree(this);
 #endif
 	assert(!err);
 	return err;
