@@ -70,6 +70,17 @@ err_t cc_storage_class_specifiers_add(cc_storage_class_specifiers_t *this,
 		*this |= bits_on(CC_STORAGE_CLASS_SPECIFIER_CONST_EXPR);
 		return ESUCCESS;
 	}
+
+	if (type == CC_TOKEN_TYPE_DEF) {
+		/* Can't have more than one */
+		if (bits_get(ts, CC_STORAGE_CLASS_SPECIFIER_TYPE_DEF))
+			return EINVAL;
+		/* type-def can't be used with anything else */
+		if (ts)
+			return EINVAL;
+		*this |= bits_on(CC_STORAGE_CLASS_SPECIFIER_TYPE_DEF);
+		return ESUCCESS;
+	}
 	assert(0);	/* TODO */
 	return EINVAL;
 }
@@ -1235,10 +1246,48 @@ static
 err_t parser_parse_storage_class_specifier(struct parser *this,
 										   struct cc_node *in[])
 {
-	assert(0);
-	(void)this;
-	(void)in;
-	return ENOTSUP;
+	err_t err;
+	int i;
+	enum cc_token_type type;
+	struct cc_node *parent, *child, *specifiers;
+	struct cc_node_storage_class_specifiers *scs;
+	struct cc_token_stream *stream;
+	struct cc_token *token;
+
+	stream = parser_token_stream(this);
+	parent = in[0];
+	assert(parent);
+	/* For now */
+	assert(cc_node_type(parent) == CC_TOKEN_DECLARATION_SPECIFIERS);
+
+	err = cc_token_stream_remove_head(stream, &token);
+	assert(err == ESUCCESS);
+	type = cc_token_type(token);
+	cc_token_delete(token);
+
+	/* Search the parent for a storage-class-specifier node */
+	specifiers = NULL;
+	CC_NODE_FOR_EACH_CHILD(parent, i, child) {
+		if (cc_node_type(child) != CC_TOKEN_STORAGE_CLASS_SPECIFIERS)
+			continue;
+		specifiers = child;
+		break;
+	}
+	if (specifiers == NULL) {
+		specifiers = cc_node_new(CC_TOKEN_STORAGE_CLASS_SPECIFIERS);
+		if (specifiers == NULL)
+			return ENOMEM;
+		err = cc_node_add_tail_child(parent, specifiers);
+		if (err)
+			return err;
+	}
+
+	/*
+	 * Attempt inserting into the bit-mask. If that fails, then this must be a
+	 * syntax error.
+	 */
+	scs = &specifiers->u.storage_class_specifiers;
+	return cc_storage_class_specifiers_add(&scs->mask, type);
 }
 
 static
