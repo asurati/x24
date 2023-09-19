@@ -27,7 +27,7 @@ static const char *g_cc_token_type_str[] = {
 #undef DEF
 };
 /*****************************************************************************/
-//static
+static
 err_t cc_storage_class_specifiers_add(cc_storage_class_specifiers_t *this,
 									  const enum cc_token_type type)
 {
@@ -999,6 +999,7 @@ err_t parser_parse_external_declaration(struct parser *this,
 	if (attributes == NULL && cc_token_type(token) == CC_TOKEN_SEMI_COLON)
 		return parser_parse(this, type, nodes, NULL);
 
+	/* Parse a single Declarator first */
 	type = CC_TOKEN_DECLARATOR;
 	err = parser_parse(this, type, NULL, &declarator);
 	if (err)
@@ -1085,13 +1086,13 @@ err_t parser_parse_declaration_specifiers(struct parser *this,
 		err = cc_token_stream_peek_head(stream, &token);
 		if (err || cc_token_type(token) != CC_TOKEN_LEFT_BRACKET)
 			continue;	/* no attrs follow */
+		/* TODO: Move this to parser_parse_declaration_specifier. */
+		assert(0);
 		type = CC_TOKEN_ATTRIBUTE_SPECIFIER_SEQUENCE;
 		err = parser_parse(this, type, &specifiers, NULL);
 		if (err)
 			return err;
 	}
-
-	/* Convert TypeSpecifiers + TypeQualifiers to type-list. */
 	assert(err == ESUCCESS);
 	*out = specifiers;
 	return err;
@@ -1191,7 +1192,7 @@ err_t parser_parse_type_specifier(struct parser *this,
 	 * syntax error.
 	 */
 	ts = &specifiers->u.type_specifiers;
-	err = cc_type_specifiers_add(&ts->mask, type);
+	err = cc_type_specifiers_add(&ts->specifiers, type);
 	if (err)
 		return err;
 
@@ -1214,7 +1215,6 @@ err_t parser_parse_type_specifier(struct parser *this,
 	if (type == CC_TOKEN_TYPE_OF ||
 		type == CC_TOKEN_TYPE_OF_UNQUAL)
 		return parser_parse_type_specifier_type_of(this, in);
-
 	/* Else, single-token specifiers */
 	err = cc_token_stream_remove_head(stream, &token);
 	assert(err == ESUCCESS);
@@ -1287,7 +1287,7 @@ err_t parser_parse_storage_class_specifier(struct parser *this,
 	 * syntax error.
 	 */
 	scs = &specifiers->u.storage_class_specifiers;
-	return cc_storage_class_specifiers_add(&scs->mask, type);
+	return cc_storage_class_specifiers_add(&scs->specifiers, type);
 }
 
 static
@@ -1335,6 +1335,12 @@ err_t parser_parse_declaration_specifier(struct parser *this,
 		return parser_parse_storage_class_specifier(this, in);
 	if (cc_token_is_function_specifier(token))
 		return parser_parse_function_specifier(this, in);
+
+	/*
+	 * This function knows the exact type of the DeclarationSpecifier.
+	 * Scan the AttributeSpecifierSequence that can follow a
+	 * DeclarationSpecifier here.
+	 */
 	return EINVAL;
 }
 /*****************************************************************************/
@@ -1343,20 +1349,85 @@ err_t parser_parse_declarator(struct parser *this,
 							  struct cc_node **out)
 {
 	err_t err;
+	bool identifier_moved;
+	struct val_queue stack;
+	struct ptr_queue qualifiers;
+	struct ptr_queue list;	/* output type-list. cc_symtab_entry * */
+	struct cc_symtab_entry *list;	/* the output type-list */
+	struct cc_symtab_entry *object;
 	enum cc_token_type type;
 	struct cc_token_stream *stream;
 	struct cc_token *token;
 	struct cc_node *pointer, *declarator;
 
-	/* use type-stack to parse the type, and build the tree */
-	pointer = NULL;
-	declarator = cc_node_new(CC_TOKEN_DECLARATOR);
+	stream = parser_token_stream(this);
+	*out = declarator = cc_node_new(CC_TOKEN_DECLARATOR);
 	if (declarator == NULL)
 		return ENOMEM;
-	stream = parser_token_stream(this);
-	err = cc_token_stream_peek_head(stream, &token);
-	if (err)
-		return err;
+
+	/* The operand-stack need only store cc_token_type enums */
+	valq_init(&stack, sizeof(enum cc_token_type), NULL);
+
+	/*
+	 * We do not pass a destructor since the elements will anyways move
+	 * into a real symtable.
+	 */
+	ptrq_init(&list, NULL);
+	identifier_moved = false;
+
+	object = NULL;
+	while (true) {
+		err = cc_token_stream_peek_head(stream, &token);
+		if (err)
+			return err;
+		type = cc_token_type(token);
+
+		/* TODO: We do not expect key-words here */
+		if (type == CC_TOKEN_IDENTIFIER) {
+			/* Can't have two idents */
+			if (identifier_moved)
+				return EINVAL;
+			identifier_moved = true;
+			err = cc_token_stream_remove_head(stream, &token);
+			assert(err == ESUCCESS);
+			object = calloc(1, sizeof(*object));
+			node = cc_node_new(CC_TOKEN_IDENTIFIER);
+			if (object == NULL || node == NULL)
+				return ENOMEM;
+
+			node->string = cc_token_string(token);
+			node->string_len = cc_token_string_length(token);
+			token->string = NULL;
+			cc_token_delete(token);
+
+			object->symbol = node;
+			object->type = CC_SYMTAB_ENTRY_OBJECT;
+			err = ptrq_add_tail(&list, object);
+			if (err)
+				return err;
+			continue;
+		}
+
+		/* If the stack is empty and we do not see a ( or [, then done */
+		if (valq_is_empty(&stack) &&
+			type != CC_TOKEN_LEFT_PAREN &&
+			type != CC_TOKEN_LEFT_BRACKET)
+			break;
+
+		if (type == CC_TOKEN_MUL) {
+			/* Can't have a Pointer after identifier is parsed. */
+			if (identifier_moved)
+				return EINVAL;
+			err = cc_token_stream_remove_head(stream, &token);
+			assert(err == ESUCCESS);
+			cc_token_delete(token);
+
+			object = calloc(1, sizeof(*object));
+			if (object == NULL)
+				return ENOMEM;
+			object->type = CC_SYMTAB_ENTRY_POINTER;
+			err = parser_parse_type_qualifiers(this,
+	}
 	if (cc_token_type(token) == CC_TOKEN_MUL) {
 		type = CC_TOKEN_POINTER;
 		err = parser_parse(this, type, NULL, &pointer);

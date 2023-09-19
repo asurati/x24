@@ -388,29 +388,31 @@ void cc_token_stream_empty(struct cc_token_stream *this)
 struct cc_symtab_entry;
 /*
  * The cpp/tokens.h has tokens defined for std. attributes.
- * We ignore non-std attributes. The reason string for deprecated and nodiscard
- * attributes is stored in the string of cc_node.
+ * We ignore non-std attributes. We also ignore the args for all attrs
+ * for now.
  */
-struct cc_node_attributes {
-	cc_attributes_t	mask;
-};
 
+/* When treated as a DeclarationSpecifier, the attributes may follow */
 struct cc_node_storage_class_specifiers {
-	cc_storage_class_specifiers_t	mask;
+	cc_storage_class_specifiers_t	specifiers;
+	cc_attributes_t	attributes;
 };
 
 struct cc_node_function_specifiers {
-	cc_function_specifiers_t	mask;
+	cc_function_specifiers_t	specifiers;
+	cc_attributes_t	attributes;
 };
 
 struct cc_node_type_qualifiers {
-	cc_type_qualifiers_t	mask;
+	cc_type_qualifiers_t	qualifiers;
+	cc_attributes_t	attributes;
 };
 
 struct cc_node_type_specifiers {
-	cc_type_specifiers_t	mask;
+	cc_type_specifiers_t	specifiers;
 	struct cc_symtab_entry	*type;
 	/* _BitInt(),Atomic(),Struct,Union,Enum,TypedefName,TypeofSpecifier. */
+	cc_attributes_t	attributes;
 };
 
 struct cc_node_alignment_specifiers {
@@ -418,6 +420,11 @@ struct cc_node_alignment_specifiers {
 		struct cc_symtab_entry	*type;	/* alignas (TypeName) */
 		struct cc_node	*expression;	/* aligans (ConstantExpression) */
 	} u;
+	cc_attributes_t	attributes;
+};
+
+struct cc_node_declarator {
+	struct ptr_queue	list;	/* type-list */
 };
 
 struct cc_node_number {
@@ -481,12 +488,15 @@ struct cc_node {
 		struct cc_node_string_literal	string;
 		struct cc_node_char_const	char_const;
 		struct cc_node_number		number;
+
+		/* These 5 are used when parsing DeclarationSpecifiers */
 		struct cc_node_storage_class_specifiers	storage_class_specifiers;
 		struct cc_node_function_specifiers	function_specifiers;
 		struct cc_node_type_qualifiers	type_qualifiers;
 		struct cc_node_type_specifiers	type_specifiers;
 		struct cc_node_alignment_specifiers	alignment_specifiers;
-		struct cc_node_attributes	attributes;
+
+		struct cc_node_declarator	declarator;
 	} u;
 };
 
@@ -633,11 +643,20 @@ struct cc_symtab_entry_bit_field {
 
 struct cc_symtab_entry_pointer {
 	struct cc_symtab_entry	*type;	/* The referenced type */
+	cc_attributes_t	attributes;
+	/*
+	 * Note that TypeQualifiers, that can qualify a pointer, themselves
+	 * have their own symtab-entries.
+	 */
 };
 
 struct cc_symtab_entry_array {
 	struct cc_symtab_entry	*type;	/* The element type */
-	int		num_elements;	/* TODO: type of index? */
+
+	/* These vars collect info present between [ and ] */
+	struct cc_node	*expression;	/* The assignment-expression */
+	cc_type_qualifiers_t	qualifiers;
+	bool	has_static;
 	bool	is_vla;
 };
 
@@ -670,7 +689,7 @@ struct cc_symtab_entry_block {
  */
 struct cc_symtab_entry_function {
 	struct cc_symtab_entry	*type;	/* The return type */
-	struct cc_symtab_entry	*block;	/* Null when func-decl only */
+	struct cc_symtab_entry	*block;
 };
 
 /* These entries are stored in scope-sym-tab[enum_tags_ns] */
