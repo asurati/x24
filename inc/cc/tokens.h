@@ -117,3 +117,4 @@ DEF(FUNCTION_BODY)
  * above. These are not used in the grammar proper (i.e. in grammar.txt). These
  * should be used only when dealing with ast and beyond.
  */
+DEF(TYPE_SPECIFIERS)

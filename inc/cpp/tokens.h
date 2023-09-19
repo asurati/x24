@@ -143,6 +143,15 @@ DEF(VOID)
 DEF(VOLATILE)
 DEF(WHILE)
 
+/* Std. Attributes. These are not keywords */
+/* NO_RETURN defined above */
+DEF(DEPRECATED)
+DEF(FALL_THROUGH)
+DEF(NO_DISCARD)
+DEF(MAY_BE_UNUSED)
+DEF(UNSEQUENCED)
+DEF(REPRODUCIBLE)
+
 /* CPP Directive keywords. if/else from above */
 DEF(DATE)
 DEF(FILE)

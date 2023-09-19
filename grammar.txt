@@ -166,6 +166,7 @@ StorageClassSpecifier:	register
 StorageClassSpecifier:	static
 StorageClassSpecifier:	thread_local
 StorageClassSpecifier:	typedef
+# typedef is in StorageClassSpecifier for syntactic convenience only.
 
 TypeSpecifier:	void
 TypeSpecifier:	char
