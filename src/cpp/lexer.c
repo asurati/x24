@@ -157,6 +157,14 @@ const char *g_key_words[] = {
 	"volatile",
 	"while",
 
+	/* std-attributes */
+	"deprecated",
+	"fallthrough",
+	"nodiscard",
+	"maybe_unused",
+	"unsequenced",
+	"reproducible",
+
 	/* CPP key-words */
 
 	/* Mandatory macros */
