@@ -110,16 +110,17 @@ DEF(BLOCK_ITEM_LIST)
 DEF(BLOCK_ITEM)
 DEF(FUNCTION_DEFINITION)
 DEF(FUNCTION_BODY)
-#endif
+#else
 /*
  * The grammar non-terminals are commented out. The hand-written parser
  * doesn't need all of them. Those which are needed are here.
- * lr/earley parsers did need them.
+ * lr/earley parsers, and txt.to.bin do need them.
  */
 NODE(TRANSLATION_UNIT)
 NODE(DECLARATION_SPECIFIERS)
 NODE(DECLARATOR)
 NODE(ATTRIBUTE_DECLARATION)
+#endif
 /* Grammar (CC) terminals and non-terminals end here */
 
 /*

@@ -106,7 +106,6 @@ const char *terminals[] = {
 	"restrict",
 	"volatile",
 	"inline",
-	"noreturn",	/* _Noreturn is obsolete */
 	"alignas",
 	"static",
 	"...",
@@ -1063,7 +1062,6 @@ enum cc_token_type name_to_type(const char *name)
 	if (!strcmp(name,"restrict")) return DEF(RESTRICT);
 	if (!strcmp(name,"volatile")) return DEF(VOLATILE);
 	if (!strcmp(name,"inline")) return DEF(INLINE);
-	if (!strcmp(name,"noreturn")) return DEF(NO_RETURN);
 	if (!strcmp(name,"alignas")) return DEF(ALIGN_AS);
 	if (!strcmp(name,"static")) return DEF(STATIC);
 	if (!strcmp(name,"...")) return DEF(ELLIPSIS);

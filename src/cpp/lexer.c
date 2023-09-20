@@ -110,7 +110,6 @@ const char *g_key_words[] = {
 	"_Decimal64",
 	"_Generic",
 	"_Imaginary",
-	"noreturn",	/* _Noreturn is obsolete */
 	"alignas",
 	"alignof",
 	"auto",
@@ -157,7 +156,8 @@ const char *g_key_words[] = {
 	"volatile",
 	"while",
 
-	/* std-attributes */
+	/* std-attributes. These are not key-words */
+	"noreturn",
 	"deprecated",
 	"fallthrough",
 	"nodiscard",
