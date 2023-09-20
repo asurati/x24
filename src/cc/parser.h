@@ -317,6 +317,7 @@ struct cc_node_type_pointer {
 
 struct cc_node_type_array {
 	struct cc_node	*type;	/* The element type */
+	struct cc_node	*attributes;	/* See ArrayDeclarator */
 
 	/* These vars collect info present between [ and ] */
 	struct cc_node	*expression;	/* The assignment-expression */
@@ -332,6 +333,7 @@ struct cc_node_type_array {
  */
 struct cc_node_type_struct {
 	struct cc_node	*symbols;
+	struct cc_node	*attributes;	/* See StructOrUnionSpecifier */
 };
 
 /*
@@ -342,10 +344,12 @@ struct cc_node_type_struct {
  * vars + inner blocks.
  *
  * symtab_entry.prev links the blocks in parent-child relation.
+ * block isn't really a type, like a function is.
+ *
+ * code of a block is the stmt-list, stored as its children.
  */
-struct cc_node_type_block {
+struct cc_node_block {
 	struct cc_node	*symbols;
-	struct cc_node	*code;		/* Null when func-decl only */
 };
 
 /*
@@ -355,11 +359,13 @@ struct cc_node_type_block {
 struct cc_node_type_function {
 	struct cc_node	*type;	/* The return type */
 	struct cc_node	*block;
+	struct cc_node	*attributes;	/* FunctionDeclarator */
 };
 
 /* These entries are stored in scope-sym-tab[enum_tags_ns] */
 struct cc_node_type_enum {
 	struct cc_node	*type;	/* underlying type */
+	struct cc_node	*attributes;	/* See EnumSpecifier */
 
 	/* Pointers to symtab-entries that define the enum constants */
 	struct ptr_queue	constants;
@@ -440,7 +446,7 @@ struct cc_node {
 		struct cc_node_number	*number;
 		struct cc_node_char_const		*char_const;
 		struct cc_node_string_literal	*string_literal;
-		struct cc_node_identifier	*identifier;
+		struct cc_node_identifier		*identifier;
 
 		struct cc_node_attributes				*attributes;
 		struct cc_node_type_specifiers			*type_specifiers;
@@ -457,12 +463,13 @@ struct cc_node {
 		struct cc_node_type_struct		*type_struct;
 		struct cc_node_type_struct		*type_union;
 		struct cc_node_type_enum		*type_enum;
-		struct cc_node_type_block		*type_block;
 		struct cc_node_type_function	*type_function;
 		struct cc_node_type_type_def	*type_type_def;
 
 		struct cc_node_symbols			*symbols;
 		struct cc_node_symbol			*symbol;
+
+		struct cc_node_block			*block;
 	} u;
 };
 

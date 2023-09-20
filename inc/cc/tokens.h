@@ -5,7 +5,7 @@
  * These are tokens for the parse tree. Included after inc/cpp/tokens.h.
  * All of these are non-terminals.
  */
-
+#if 0
 DEF(TRANSLATION_OBJECT)	/* Must be kept first in this file */
 DEF(TRANSLATION_UNIT)
 DEF(EXTERNAL_DECLARATION)
@@ -110,6 +110,16 @@ DEF(BLOCK_ITEM_LIST)
 DEF(BLOCK_ITEM)
 DEF(FUNCTION_DEFINITION)
 DEF(FUNCTION_BODY)
+#endif
+/*
+ * The grammar non-terminals are commented out. The hand-written parser
+ * doesn't need all of them. Those which are needed are here.
+ * lr/earley parsers did need them.
+ */
+NODE(TRANSLATION_UNIT)
+NODE(DECLARATION_SPECIFIERS)
+NODE(DECLARATOR)
+NODE(ATTRIBUTE_DECLARATION)
 /* Grammar (CC) terminals and non-terminals end here */
 
 /*
@@ -138,7 +148,6 @@ NODE(TYPE_POINTER)
 NODE(TYPE_ARRAY)
 NODE(TYPE_STRUCT)
 NODE(TYPE_UNION)
-NODE(TYPE_BLOCK)
 NODE(TYPE_FUNCTION)
 NODE(TYPE_ENUM)
 NODE(TYPE_TYPE_DEF)
@@ -146,3 +155,4 @@ NODE(TYPE_TYPE_DEF)
 NODE(SYMBOLS)
 NODE(SYMBOL)
 NODE(OBJECT)
+NODE(BLOCK)

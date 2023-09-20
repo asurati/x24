@@ -81,6 +81,39 @@ struct cc_node *cc_node_new(const enum cc_node_type type)
 }
 
 static
+struct cc_node *cc_node_new_symbols(const enum cc_scope scope)
+{
+	int i;
+	struct cc_node *this;
+	struct cc_node_symbols *ss;
+
+	this = cc_node_new(CC_NODE_SYMBOLS);
+	ss = calloc(1, sizeof(*ss));
+	if (this == NULL || ss == NULL)
+		return NULL;
+	this->u.symbols = ss;
+	ss->scope = scope;
+	for (i = 0; i < CC_NAME_SPACE_MAX; ++i)
+		ptrq_init(&ss->entries[i], cc_node_delete);
+	return this;
+}
+
+static
+struct cc_node *cc_node_new_symbol(struct cc_node *symbols)
+{
+	struct cc_node *this;
+	struct cc_node_symbol *s;
+
+	this = cc_node_new(CC_NODE_SYMBOL);
+	s = calloc(1, sizeof(*s));
+	if (this == NULL || s == NULL)
+		return NULL;
+	this->u.symbol = s;
+	s->symbols = symbols;
+	return this;
+}
+
+static
 struct cc_node *cc_node_new_type_specifiers(void)
 {
 	struct cc_node *this;
@@ -164,6 +197,63 @@ struct cc_node *cc_node_new_attributes(void)
 	return this;
 }
 
+/* Scope is block or prototype */
+static
+struct cc_node *cc_node_new_block(const enum cc_scope scope)
+{
+	struct cc_node *this, *symbols;
+	struct cc_node_block *b;
+
+	this = cc_node_new(CC_NODE_BLOCK);
+	symbols = cc_node_new_symbols(scope);
+	b = calloc(1, sizeof(*b));
+	if (this == NULL || b == NULL || symbols == NULL)
+		return NULL;
+	b->symbols = symbols;
+	this->u.block = b;
+	return this;
+}
+
+static
+struct cc_node *cc_node_new_type_array(struct cc_node *type)
+{
+	struct cc_node *this, *attrs;
+	struct cc_node_type_array *ta;
+
+	attrs = cc_node_new_attributes();
+	this = cc_node_new(CC_NODE_TYPE_FUNCTION);
+	ta = calloc(1, sizeof(*ta));
+	if (this == NULL || ta == NULL || attrs == NULL)
+		return NULL;
+	ta->attributes = attrs;
+	ta->type = type;	/* The ret type */
+	this->u.type_array = ta;
+	return this;
+}
+
+static
+struct cc_node *cc_node_new_type_function(struct cc_node *type)
+{
+	struct cc_node *this, *attrs, *block;
+	struct cc_node_type_function *tf;
+
+	/*
+	 * scope is set to prototype initially. Once parser knows that it is
+	 * parsing a func-defn, it changes the scope to block.
+	 */
+	attrs = cc_node_new_attributes();
+	block = cc_node_new_block(CC_SCOPE_PROTOTYPE);
+	this = cc_node_new(CC_NODE_TYPE_FUNCTION);
+	tf = calloc(1, sizeof(*tf));
+	if (this == NULL || tf == NULL || attrs == NULL || block == NULL)
+		return NULL;
+	tf->block = block;
+	tf->attributes = attrs;
+	tf->type = type;	/* The ret type */
+	this->u.type_function = tf;
+	return this;
+}
+
 static
 struct cc_node *cc_node_new_type_pointer(struct cc_node *type)
 {
@@ -179,7 +269,6 @@ struct cc_node *cc_node_new_type_pointer(struct cc_node *type)
 	tp->type = type;
 	this->u.type_pointer = tp;
 	return this;
-
 }
 
 static
@@ -196,6 +285,7 @@ struct cc_node *cc_node_new_declarator(void)
 	this->u.declarator = d;
 	return this;
 }
+
 static
 struct cc_node *cc_node_new_declaration_specifiers(void)
 {
@@ -222,39 +312,6 @@ struct cc_node *cc_node_new_declaration_specifiers(void)
 		if (err)
 			return NULL;
 	}
-	return this;
-}
-
-static
-struct cc_node *cc_node_new_symbols(const enum cc_scope scope)
-{
-	int i;
-	struct cc_node *this;
-	struct cc_node_symbols *ss;
-
-	this = cc_node_new(CC_NODE_SYMBOLS);
-	ss = calloc(1, sizeof(*ss));
-	if (this == NULL || ss == NULL)
-		return NULL;
-	this->u.symbols = ss;
-	ss->scope = scope;
-	for (i = 0; i < CC_NAME_SPACE_MAX; ++i)
-		ptrq_init(&ss->entries[i], cc_node_delete);
-	return this;
-}
-
-static
-struct cc_node *cc_node_new_symbol(struct cc_node *symbols)
-{
-	struct cc_node *this;
-	struct cc_node_symbol *s;
-
-	this = cc_node_new(CC_NODE_SYMBOL);
-	s = calloc(1, sizeof(*s));
-	if (this == NULL || s == NULL)
-		return NULL;
-	this->u.symbol = s;
-	s->symbols = symbols;
 	return this;
 }
 
@@ -302,6 +359,12 @@ void *cc_node_assert_type(struct cc_node *this,
 	case CC_NODE_TRANSLATION_UNIT:
 	case CC_NODE_DECLARATION_SPECIFIERS:
 		return this;
+	case CC_NODE_BLOCK:
+		ret = this->u.block;
+		break;
+	case CC_NODE_TYPE_FUNCTION:
+		ret = this->u.type_function;
+		break;
 	case CC_NODE_DECLARATOR:
 		ret = this->u.declarator;
 		break;
@@ -423,7 +486,7 @@ err_t cc_node_add_type_qualifier(struct cc_node *this,
 								 const enum cc_token_type type)
 {
 	struct cc_node_type_qualifiers *tq;
-	tq = cc_node_assert_type(this, CC_NODE_TYPE_QUALIFIER_LIST);
+	tq = cc_node_assert_type(this, CC_NODE_TYPE_QUALIFIERS);
 	return cc_node_type_qualifiers_add(tq, type);
 }
 /*****************************************************************************/
@@ -1463,7 +1526,6 @@ err_t parser_parse_declaration_specifiers(struct parser *this,
 	return err;
 }
 /*****************************************************************************/
-/* TODO Continue from here */
 static
 err_t parser_parse_declaration(struct parser *this,
 							   struct cc_node *nodes[])
@@ -1563,23 +1625,117 @@ err_t parser_parse_type_pointer(struct parser *this,
 }
 /*****************************************************************************/
 static
-err_t parser_parse_declarator_function(struct parser *this,
-									   struct ptr_queue *list)
+err_t parser_parse_array(struct parser *this,
+						 struct cc_node *node)
 {
 	assert(0);
 	(void)this;
-	(void)list;
+	(void)node;	/* type is type_array */
 	return ENOTSUP;
+}
+/*****************************************************************************/
+static
+err_t parser_parse_parameter_declaration(struct parser *this)
+{
+	assert(0);
+	(void)this;
+	return ENOTSUP;
+}
+
+static
+err_t parser_parse_function_parameters(struct parser *this,
+									   struct cc_node *node)
+{
+	err_t err;
+	bool has_ellipsis;
+	enum cc_token_type type;
+	struct cc_token_stream *stream;
+	struct cc_token *token;
+	struct cc_node *symbols;
+	struct cc_node_type_function *tf;
+	struct cc_node_block *b;
+	struct cc_node_symbols *ss;
+
+	stream = parser_token_stream(this);
+	err = cc_token_stream_remove_head(stream, &token);
+	assert(err == ESUCCESS);
+	assert(cc_token_type(token) == CC_TOKEN_LEFT_PAREN);
+	cc_token_delete(token);
+
+	tf = cc_node_assert_type(node, CC_NODE_TYPE_FUNCTION);
+	b = cc_node_assert_type(tf->block, CC_NODE_BLOCK);
+	ss = cc_node_assert_type(b->symbols, CC_NODE_SYMBOLS);
+	assert(cc_node_symbols_scope(ss) == CC_SCOPE_PROTOTYPE);
+
+	symbols = this->symbols;	/* Save the current symbol-table */
+	this->symbols = b->symbols;	/* Set the new symbol-table */
+	has_ellipsis = false;
+	while (true) {
+		err = cc_token_stream_remove_head(stream, &token);
+		if (err)
+			return err;
+		type = cc_token_type(token);
+		if (has_ellipsis && type != CC_TOKEN_RIGHT_PAREN)
+			return EINVAL;
+		if (type == CC_TOKEN_RIGHT_PAREN) {
+			cc_token_delete(token);
+			break;
+		}
+		if (type == CC_TOKEN_ELLIPSIS) {
+			cc_token_delete(token);
+			has_ellipsis = true;
+			continue;
+		}
+		err = parser_parse_parameter_declaration(this);
+		if (err)
+			return err;
+		err = cc_token_stream_peek_head(stream, &token);
+		if (err)
+			return err;
+		type = cc_token_type(token);
+		if (type == CC_TOKEN_RIGHT_PAREN)
+			continue;
+		if (type != CC_TOKEN_COMMA)
+			return EINVAL;
+		cc_token_delete(token);
+	}
+	assert(err == ESUCCESS);
+	this->symbols = symbols;	/* Revert back to the previous symtab */
+	return err;
+}
+/*****************************************************************************/
+static
+err_t parser_parse_declarator_function(struct parser *this,
+									   struct ptr_queue *list)
+{
+	err_t err;
+	struct cc_node *node;
+
+	node = cc_node_new_type_function(NULL);	/* ret-type isn't known yet */
+	if (node == NULL)
+		return ENOMEM;
+	err = parser_parse_function_parameters(this, node);
+	if (!err)
+		err = ptrq_add_tail(list, node);
+	/* TODO: AttributeSpecifiers */
+	return err;
 }
 
 static
 err_t parser_parse_declarator_array(struct parser *this,
 									struct ptr_queue *list)
 {
-	assert(0);
-	(void)this;
-	(void)list;
-	return ENOTSUP;
+	err_t err;
+	struct cc_node *node;
+
+	node = cc_node_new_type_array(NULL);	/* ele-type isn't known yet */
+	if (node == NULL)
+		return ENOMEM;
+	err = parser_parse_array(this, node);
+	if (!err)
+		err = ptrq_add_tail(list, node);
+	/* TODO: AttributeSpecifiers */
+	return err;
 }
 
 static
