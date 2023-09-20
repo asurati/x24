@@ -607,7 +607,7 @@ err_t cc_node_find_type_def(struct cc_node *this,
 	err_t err;
 	const struct cc_node_symbols *ss;
 
-	while (true) {
+	while (this) {
 		ss = cc_node_assert_type(this, CC_NODE_SYMBOLS);
 		err = cc_node_symbols_find_type_def(ss, name, out);
 		if (err)
@@ -1133,6 +1133,7 @@ static
 err_t parser_parse_static_assert_declaration(struct parser *this,
 											 struct cc_node *parent)
 {
+	assert(0);
 	(void)this;
 	(void)parent;
 	return ENOTSUP;
@@ -1142,6 +1143,7 @@ static
 err_t parser_parse_attribute_specifiers(struct parser *this,
 										struct cc_node *node)
 {
+	assert(0);
 	(void)this;
 	(void)node;
 	return ENOTSUP;
@@ -1410,6 +1412,7 @@ err_t parser_parse_declaration_specifiers(struct parser *this,
 		if (cc_token_type(token) == CC_TOKEN_IDENTIFIER) {
 			/* Should be a TypedefName. If not, break */
 			str = cc_token_string(token);
+			assert(this->symbols);
 			err = cc_node_find_type_def(this->symbols, str, &stes);
 			if (err == ENOENT) {
 				err = ESUCCESS;
@@ -1434,6 +1437,7 @@ static
 err_t parser_parse_declaration(struct parser *this,
 							   struct cc_node *nodes[])
 {
+	assert(0);
 	(void)this;
 	(void)nodes;
 	return ENOTSUP;
@@ -1443,6 +1447,7 @@ static
 err_t parser_parse_function_definition(struct parser *this,
 									   struct cc_node *nodes[])
 {
+	assert(0);
 	(void)this;
 	(void)nodes;
 	return ENOTSUP;
@@ -1452,6 +1457,7 @@ static
 err_t parser_parse_declarator(struct parser *this,
 							  struct cc_node **out)
 {
+	assert(0);
 	(void)this;
 	(void)out;
 	return ENOTSUP;
@@ -1687,7 +1693,7 @@ void parser_print_ast(const struct parser *this)
 	cc_node_print(this->root);
 }
 /*****************************************************************************/
-err_t parser_parse_tokens(struct parser *this)
+err_t parser_parse(struct parser *this)
 {
 	err_t err;
 	err = parser_parse_translation_unit(this, &this->root);

@@ -41,7 +41,7 @@ int main(int argc, char **argv)
 	err = parser_new(path, &parser);	/* path owned by parser */
 	if (err)
 		goto err1;
-	err = parser_parse_tokens(parser);
+	err = parser_parse(parser);
 	goto err2;
 err2:
 	if (parser)

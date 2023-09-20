@@ -11,5 +11,5 @@ struct parser;
 err_t	parser_new(const char *path,
 				   struct parser **out);
 err_t	parser_delete(struct parser *this);
-err_t	parser_parse_tokens(struct parser *this);
+err_t	parser_parse(struct parser *this);
 #endif
