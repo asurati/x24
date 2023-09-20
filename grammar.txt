@@ -283,7 +283,8 @@ TypeQualifier:	volatile
 TypeQualifier:	_Atomic
 
 FunctionSpecifier:	inline
-FunctionSpecifier:	_Noreturn
+FunctionSpecifier:	noreturn
+# _Noreturn is obsolete
 
 AlignmentSpecifier:	alignas	(	TypeName	)
 AlignmentSpecifier:	alignas	(	ConstantExpression	)
