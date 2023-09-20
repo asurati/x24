@@ -302,6 +302,9 @@ void *cc_node_assert_type(struct cc_node *this,
 	case CC_NODE_TRANSLATION_UNIT:
 	case CC_NODE_DECLARATION_SPECIFIERS:
 		return this;
+	case CC_NODE_DECLARATOR:
+		ret = this->u.declarator;
+		break;
 	case CC_NODE_TYPE_SPECIFIERS:
 		ret = this->u.type_specifiers;
 		break;
@@ -1460,6 +1463,7 @@ err_t parser_parse_declaration_specifiers(struct parser *this,
 	return err;
 }
 /*****************************************************************************/
+/* TODO Continue from here */
 static
 err_t parser_parse_declaration(struct parser *this,
 							   struct cc_node *nodes[])
@@ -1698,9 +1702,9 @@ err_t parser_parse_declarator(struct parser *this,
 		assert(0);
 		return EINVAL;
 	}
-	d = cc_node_assert_type(out[0], CC_NODE_DECLARATOR);
-	d->list = list;
 	assert(err == ESUCCESS);
+	d = cc_node_assert_type(out[0], CC_NODE_DECLARATOR);
+	return ptrq_move(&list, &d->list);
 	return err;
 }
 /*****************************************************************************/
