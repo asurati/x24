@@ -110,7 +110,7 @@ const char *g_key_words[] = {
 	"_Decimal64",
 	"_Generic",
 	"_Imaginary",
-	"_Noreturn",
+	"noreturn",	/* _Noreturn is obsolete */
 	"alignas",
 	"alignof",
 	"auto",
