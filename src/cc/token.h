@@ -155,6 +155,13 @@ void cc_token_init(struct cc_token *this)
 }
 
 static inline
+void cc_token_reset_string(struct cc_token *this)
+{
+	this->string = NULL;
+	this->string_len = 0;
+}
+
+static inline
 const char *cc_token_string(const struct cc_token *this)
 {
 	return this->string;

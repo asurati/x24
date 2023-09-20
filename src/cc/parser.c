@@ -165,6 +165,38 @@ struct cc_node *cc_node_new_attributes(void)
 }
 
 static
+struct cc_node *cc_node_new_type_pointer(struct cc_node *type)
+{
+	struct cc_node *this, *attrs;
+	struct cc_node_type_pointer *tp;
+
+	attrs = cc_node_new_attributes();
+	this = cc_node_new(CC_NODE_TYPE_POINTER);
+	tp = calloc(1, sizeof(*tp));
+	if (this == NULL || tp == NULL || attrs == NULL)
+		return NULL;
+	tp->attributes = attrs;
+	tp->type = type;
+	this->u.type_pointer = tp;
+	return this;
+
+}
+
+static
+struct cc_node *cc_node_new_declarator(void)
+{
+	struct cc_node *this;
+	struct cc_node_declarator *d;
+
+	this = cc_node_new(CC_NODE_DECLARATOR);
+	d = calloc(1, sizeof(*d));
+	if (this == NULL || d == NULL)
+		return NULL;
+	ptrq_init(&d->list, cc_node_delete);
+	this->u.declarator = d;
+	return this;
+}
+static
 struct cc_node *cc_node_new_declaration_specifiers(void)
 {
 	int i;
@@ -227,25 +259,21 @@ struct cc_node *cc_node_new_symbol(struct cc_node *symbols)
 }
 
 /* Claims ownership of string */
-//static
-struct cc_node *cc_node_new_identifier(const enum cc_node_type type,
-									   const char *string,
+static
+struct cc_node *cc_node_new_identifier(const char *string,
 									   const size_t string_len)
 {
 	struct cc_node *this;
 	struct cc_node_identifier *ident;
 
-	assert(string == NULL || type == CC_NODE_IDENTIFIER);
-
-	this = cc_node_new(type);
+	assert(string);
+	this = cc_node_new(CC_NODE_IDENTIFIER);
 	ident = calloc(1, sizeof(*ident));
 	if (this == NULL || ident == NULL)
 		return NULL;
+	ident->string = string;
+	ident->string_len = string_len;
 	this->u.identifier = ident;
-	if (string) {
-		ident->string = string;
-		ident->string_len = string_len;
-	}
 	return this;
 }
 
@@ -1457,108 +1485,112 @@ static
 err_t parser_parse_declarator(struct parser *this,
 							  struct cc_node **out)
 {
-	assert(0);
-	(void)this;
-	(void)out;
-	return ENOTSUP;
-}
-#if 0
-static
-err_t parser_parse_declarator(struct parser *this,
-							  struct cc_node **out)
-{
 	err_t err;
-	bool identifier_moved;
-	struct val_queue stack;
-	struct ptr_queue qualifiers;
+	bool ident_found;
+	struct ptr_queue stack;
 	struct ptr_queue list;	/* output type-list. cc_symtab_entry * */
-	struct cc_symtab_entry *list;	/* the output type-list */
-	struct cc_symtab_entry *object;
 	enum cc_token_type type;
 	struct cc_token_stream *stream;
-	struct cc_token *token;
-	struct cc_node *pointer, *declarator;
+	struct cc_token *token, *t;
+	struct cc_node_type_pointer *tp;
+	struct cc_node *node, *attrs, *tq;
+
+	assert(out[0] == NULL);	/* for now */
 
 	stream = parser_token_stream(this);
-	*out = declarator = cc_node_new(CC_TOKEN_DECLARATOR);
-	if (declarator == NULL)
+	out[0] = cc_node_new_declarator();
+	if (out[0] == NULL)
 		return ENOMEM;
 
 	/* The operand-stack need only store cc_token_type enums */
-	valq_init(&stack, sizeof(enum cc_token_type), NULL);
-
-	/*
-	 * We do not pass a destructor since the elements will anyways move
-	 * into a real symtable.
-	 */
-	ptrq_init(&list, NULL);
-	identifier_moved = false;
-
-	object = NULL;
+	ptrq_init(&stack, NULL);
+	ptrq_init(&list, NULL);	/* destructor not needed; items moved */
+	ident_found = false;
 	while (true) {
-		err = cc_token_stream_peek_head(stream, &token);
+		err = cc_token_stream_remove_head(stream, &token);
 		if (err)
 			return err;
 		type = cc_token_type(token);
-
 		/* TODO: We do not expect key-words here */
+
 		if (type == CC_TOKEN_IDENTIFIER) {
 			/* Can't have two idents */
-			if (identifier_moved)
+			if (ident_found)
 				return EINVAL;
-			identifier_moved = true;
-			err = cc_token_stream_remove_head(stream, &token);
-			assert(err == ESUCCESS);
-			object = calloc(1, sizeof(*object));
-			node = cc_node_new(CC_TOKEN_IDENTIFIER);
-			if (object == NULL || node == NULL)
-				return ENOMEM;
 
-			node->string = cc_token_string(token);
-			node->string_len = cc_token_string_length(token);
-			token->string = NULL;
+			ident_found = true;
+			node = cc_node_new_identifier(cc_token_string(token),
+										  cc_token_string_length(token));
+			if (node == NULL)
+				return ENOMEM;
+			cc_token_reset_string(token);
 			cc_token_delete(token);
 
-			object->symbol = node;
-			object->type = CC_SYMTAB_ENTRY_OBJECT;
-			err = ptrq_add_tail(&list, object);
+			assert(ptrq_num_entries(&list) == 0);
+			err = ptrq_add_tail(&list, node);
 			if (err)
 				return err;
 			continue;
 		}
 
 		/* If the stack is empty and we do not see a ( or [, then done */
-		if (valq_is_empty(&stack) &&
+		if (ptrq_is_empty(&stack) &&
 			type != CC_TOKEN_LEFT_PAREN &&
-			type != CC_TOKEN_LEFT_BRACKET)
+			type != CC_TOKEN_LEFT_BRACKET) {
+			err = cc_token_stream_add_head(stream, token);
+			if (err)
+				return err;
 			break;
+		}
 
 		if (type == CC_TOKEN_MUL) {
 			/* Can't have a Pointer after identifier is parsed. */
-			if (identifier_moved)
+			if (ident_found)
 				return EINVAL;
-			err = cc_token_stream_remove_head(stream, &token);
-			assert(err == ESUCCESS);
 			cc_token_delete(token);
-
-			object = calloc(1, sizeof(*object));
-			if (object == NULL)
+			node = cc_node_new_type_pointer(NULL);
+			if (node == NULL)
 				return ENOMEM;
-			object->type = CC_SYMTAB_ENTRY_POINTER;
-			//err = parser_parse_type_qualifiers(this,
-		}
-		if (cc_token_type(token) == CC_TOKEN_MUL) {
-			type = CC_TOKEN_POINTER;
-			err = parser_parse(this, type, NULL, &pointer);
+			tp = cc_node_assert_type(node, CC_NODE_TYPE_POINTER);
+			attrs = tp->attributes;
+			err = ptrq_add_tail(&stack, node);	/* push on the stack */
 			if (err)
 				return err;
+
+			/* Are there any AttributeSpecifiers for the pointer? */
+			err = cc_token_stream_peek_entry(stream, 0, &token);
+			if (!err)
+				err = cc_token_stream_peek_entry(stream, 1, &t);
+			if (!err &&
+				cc_token_type(token) == CC_TOKEN_LEFT_BRACKET &&
+				cc_token_type(t) == CC_TOKEN_LEFT_BRACKET)
+				err = parser_parse_attribute_specifiers(this, attrs);
+			if (err)
+				return err;
+
+			/* Are there any typequalifiers? Add as a child. */
+			err = cc_token_stream_peek_head(stream, &token);
+			if (err || !cc_token_is_type_qualifier(token))
+				continue;
+			tq = cc_node_new_type_qualifiers();
+			if (tq == NULL)
+				return ENOMEM;
+			err = cc_node_add_tail_child(node, tq);
+			if (err)
+				return err;
+			while (true) {
+				err = cc_token_stream_peek_head(stream, &token);
+				if (err || !cc_token_is_type_qualifier(token))
+					break;
+				err = parser_parse_type_qualifier(this, tq);
+				if (err)
+					return err;
+			}
+			continue;
 		}
-		/* Parse the declarator and create a list */
-		(void)out;
-		return ENOTSUP;
 	}
+	return ENOTSUP;
 }
-#endif
 /*****************************************************************************/
 static
 err_t parser_parse_external_declaration(struct parser *this,

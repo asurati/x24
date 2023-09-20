@@ -308,7 +308,7 @@ struct cc_node_type_bit_field {
 
 struct cc_node_type_pointer {
 	struct cc_node	*type;	/* The referenced type */
-	struct cc_node_attributes	attributes;
+	struct cc_node	*attributes;
 	/*
 	 * Note that TypeQualifiers, that can qualify a pointer, themselves
 	 * have their own symtab-entries.
@@ -320,7 +320,7 @@ struct cc_node_type_array {
 
 	/* These vars collect info present between [ and ] */
 	struct cc_node	*expression;	/* The assignment-expression */
-	struct cc_node_type_qualifiers	qualifiers;
+	struct cc_node	*type_qualifiers;
 	bool	has_static;
 	bool	is_vla;
 };
@@ -447,6 +447,7 @@ struct cc_node {
 		struct cc_node_function_specifiers		*function_specifiers;
 		struct cc_node_storage_specifiers		*storage_specifiers;
 		struct cc_node_alignment_specifiers		*alignment_specifiers;
+		struct cc_node_declarator				*declarator;
 
 		struct cc_node_type_integer		*type_integer;
 		struct cc_node_type_bit_field	*type_bit_field;
