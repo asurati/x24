@@ -1339,19 +1339,19 @@ err_t parser_parse_declaration_specifier(struct parser *this,
 	struct cc_token_stream *stream;
 	struct cc_token *token, *t;
 	struct cc_node *n[10], *attributes;
-	typedef err_t func(struct parser *this, struct cc_node *node);
-	func *funcs[5];
+	/* Ordering of the children: ts, tq, fs, ss, as, and then attrs */
+	/* typedef err_t func(struct parser *, struct cc_node *); */
+	/* static func * const funcs[5] = { */
+	static err_t (* const funcs[5])(struct parser *, struct cc_node *) = {
+		parser_parse_type_specifier,
+		parser_parse_type_qualifier,
+		parser_parse_function_specifier,
+		parser_parse_storage_specifier,
+		parser_parse_alignment_specifier,
+	};
 
 	stream = parser_token_stream(this);
 	cc_node_assert_type(parent, CC_NODE_DECLARATION_SPECIFIERS);
-
-	/* Ordering of the children: ts, tq, fs, ss, as, and then attrs */
-	funcs[0] = parser_parse_type_specifier;
-	funcs[1] = parser_parse_type_qualifier;
-	funcs[2] = parser_parse_function_specifier;
-	funcs[3] = parser_parse_storage_specifier;
-	funcs[4] = parser_parse_alignment_specifier;
-
 	assert(cc_node_num_children(parent) == 10);
 	for (i = 0; i < 10; ++i) {
 		n[i] = cc_node_peek_child(parent, i);
@@ -1360,7 +1360,6 @@ err_t parser_parse_declaration_specifier(struct parser *this,
 
 	err = cc_token_stream_peek_head(stream, &token);
 	assert(err == ESUCCESS);
-
 	if (cc_token_is_type_specifier(token))
 		i = 0;
 	else if (cc_token_is_type_qualifier(token))
@@ -1372,7 +1371,7 @@ err_t parser_parse_declaration_specifier(struct parser *this,
 	else if (cc_token_is_alignment_specifier(token))
 		i = 4;
 	else
-		err = EINVAL;
+		return EINVAL;
 
 	/* Atomic may represent either a TypeSpecifier or a TypeQualifier */
 	if (cc_token_type(token) == CC_TOKEN_ATOMIC) {
@@ -1482,6 +1481,104 @@ err_t parser_parse_function_definition(struct parser *this,
 }
 /*****************************************************************************/
 static
+err_t parser_parse_identifier(struct parser *this,
+							  struct cc_node **out)
+{
+	err_t err;
+	struct cc_token_stream *stream;
+	struct cc_token *token;
+
+	assert(out[0] == NULL);
+	stream = parser_token_stream(this);
+
+	err = cc_token_stream_remove_head(stream, &token);
+	assert(err == ESUCCESS);
+	assert(cc_token_is_identifier(token));
+	out[0] = cc_node_new_identifier(cc_token_string(token),
+									cc_token_string_length(token));
+	if (out[0] == NULL)
+		return ENOMEM;
+	cc_token_reset_string(token);
+	cc_token_delete(token);
+	return err;
+}
+/*****************************************************************************/
+static
+err_t parser_parse_type_pointer(struct parser *this,
+								struct cc_node *type,
+								struct cc_node **out)
+{
+	err_t err;
+	struct cc_token_stream *stream;
+	struct cc_token *tokens[2];
+	struct cc_node_type_pointer *tp;
+	struct cc_node *tq;
+
+	assert(out[0] == NULL);
+	stream = parser_token_stream(this);
+
+	err = cc_token_stream_remove_head(stream, &tokens[0]);
+	assert(err == ESUCCESS);
+	assert(cc_token_type(tokens[0]) == CC_TOKEN_MUL);
+	cc_token_delete(tokens[0]);
+
+	out[0] = cc_node_new_type_pointer(type);
+	if (out[0] == NULL)
+		return ENOMEM;
+	tp = cc_node_assert_type(out[0], CC_NODE_TYPE_POINTER);
+
+	/* Are there any AttributeSpecifiers for this pointer? */
+	err = cc_token_stream_peek_entry(stream, 0, &tokens[0]);
+	if (!err)
+		err = cc_token_stream_peek_entry(stream, 1, &tokens[1]);
+	if (!err &&
+		cc_token_type(tokens[0]) == CC_TOKEN_LEFT_BRACKET &&
+		cc_token_type(tokens[1]) == CC_TOKEN_LEFT_BRACKET)
+		err = parser_parse_attribute_specifiers(this, tp->attributes);
+	if (err)
+		return err;
+
+	/* Are there any TypeQualifier? Add the group as a child. */
+	err = cc_token_stream_peek_head(stream, &tokens[0]);
+	if (err || !cc_token_is_type_qualifier(tokens[0]))
+		return ESUCCESS;	/* error handled later */
+
+	/* Collect all the TypeQualifiers into a single child */
+	tq = cc_node_new_type_qualifiers();
+	if (tq == NULL)
+		return ENOMEM;
+	while (true) {
+		err = cc_token_stream_peek_head(stream, &tokens[0]);
+		if (err || !cc_token_is_type_qualifier(tokens[0]))
+			break;	/* Any err handled later */
+		err = parser_parse_type_qualifier(this, tq);
+		if (err)
+			return err;
+	}
+	return cc_node_add_tail_child(out[0], tq);
+}
+/*****************************************************************************/
+static
+err_t parser_parse_declarator_function(struct parser *this,
+									   struct ptr_queue *list)
+{
+	assert(0);
+	(void)this;
+	(void)list;
+	return ENOTSUP;
+}
+
+static
+err_t parser_parse_declarator_array(struct parser *this,
+									struct ptr_queue *list)
+{
+	assert(0);
+	(void)this;
+	(void)list;
+	return ENOTSUP;
+}
+
+static
 err_t parser_parse_declarator(struct parser *this,
 							  struct cc_node **out)
 {
@@ -1490,10 +1587,10 @@ err_t parser_parse_declarator(struct parser *this,
 	struct ptr_queue stack;
 	struct ptr_queue list;	/* output type-list. cc_symtab_entry * */
 	enum cc_token_type type;
+	struct cc_node_declarator *d;
 	struct cc_token_stream *stream;
-	struct cc_token *token, *t;
-	struct cc_node_type_pointer *tp;
-	struct cc_node *node, *attrs, *tq;
+	struct cc_node *node;
+	struct cc_token *token;
 
 	assert(out[0] == NULL);	/* for now */
 
@@ -1507,27 +1604,23 @@ err_t parser_parse_declarator(struct parser *this,
 	ptrq_init(&list, NULL);	/* destructor not needed; items moved */
 	ident_found = false;
 	while (true) {
-		err = cc_token_stream_remove_head(stream, &token);
+		err = cc_token_stream_peek_head(stream, &token);
 		if (err)
 			return err;
+		/* We do not expect key-words here */
+		assert(!cc_token_is_key_word(token));
 		type = cc_token_type(token);
-		/* TODO: We do not expect key-words here */
-
 		if (type == CC_TOKEN_IDENTIFIER) {
 			/* Can't have two idents */
 			if (ident_found)
 				return EINVAL;
-
 			ident_found = true;
-			node = cc_node_new_identifier(cc_token_string(token),
-										  cc_token_string_length(token));
-			if (node == NULL)
-				return ENOMEM;
-			cc_token_reset_string(token);
-			cc_token_delete(token);
-
-			assert(ptrq_num_entries(&list) == 0);
-			err = ptrq_add_tail(&list, node);
+			node = NULL;
+			err = parser_parse_identifier(this, &node);
+			if (!err)
+				assert(ptrq_num_entries(&list) == 0);
+			if (!err)
+				err = ptrq_add_tail(&list, node);
 			if (err)
 				return err;
 			continue;
@@ -1536,60 +1629,79 @@ err_t parser_parse_declarator(struct parser *this,
 		/* If the stack is empty and we do not see a ( or [, then done */
 		if (ptrq_is_empty(&stack) &&
 			type != CC_TOKEN_LEFT_PAREN &&
-			type != CC_TOKEN_LEFT_BRACKET) {
-			err = cc_token_stream_add_head(stream, token);
-			if (err)
-				return err;
+			type != CC_TOKEN_LEFT_BRACKET)
 			break;
-		}
 
 		if (type == CC_TOKEN_MUL) {
 			/* Can't have a Pointer after identifier is parsed. */
 			if (ident_found)
 				return EINVAL;
-			cc_token_delete(token);
-			node = cc_node_new_type_pointer(NULL);
-			if (node == NULL)
-				return ENOMEM;
-			tp = cc_node_assert_type(node, CC_NODE_TYPE_POINTER);
-			attrs = tp->attributes;
-			err = ptrq_add_tail(&stack, node);	/* push on the stack */
-			if (err)
-				return err;
-
-			/* Are there any AttributeSpecifiers for the pointer? */
-			err = cc_token_stream_peek_entry(stream, 0, &token);
+			node = NULL;
+			err = parser_parse_type_pointer(this, NULL, &node);
 			if (!err)
-				err = cc_token_stream_peek_entry(stream, 1, &t);
-			if (!err &&
-				cc_token_type(token) == CC_TOKEN_LEFT_BRACKET &&
-				cc_token_type(t) == CC_TOKEN_LEFT_BRACKET)
-				err = parser_parse_attribute_specifiers(this, attrs);
+				err = ptrq_add_tail(&stack, node);
 			if (err)
 				return err;
-
-			/* Are there any typequalifiers? Add as a child. */
-			err = cc_token_stream_peek_head(stream, &token);
-			if (err || !cc_token_is_type_qualifier(token))
-				continue;
-			tq = cc_node_new_type_qualifiers();
-			if (tq == NULL)
-				return ENOMEM;
-			err = cc_node_add_tail_child(node, tq);
-			if (err)
-				return err;
-			while (true) {
-				err = cc_token_stream_peek_head(stream, &token);
-				if (err || !cc_token_is_type_qualifier(token))
-					break;
-				err = parser_parse_type_qualifier(this, tq);
-				if (err)
-					return err;
-			}
 			continue;
 		}
+
+		if (type == CC_TOKEN_LEFT_PAREN && ident_found) {
+			/* This is the params of a func-type. consumes the right-paren */
+			err = parser_parse_declarator_function(this, &list);
+			if (err)
+				return err;
+			continue;
+		}
+
+		if (type == CC_TOKEN_LEFT_PAREN && !ident_found) {
+			err = cc_token_stream_remove_head(stream, &token);
+			assert(err == ESUCCESS);
+			cc_token_delete(token);
+
+			/* This is a precedence-ordering paren */
+			node = cc_node_new(CC_NODE_LEFT_PAREN);
+			if (node == NULL)
+				return ENOMEM;
+			err = ptrq_add_tail(&stack, node);
+			if (err)
+				return err;
+			continue;
+		}
+
+		if (type == CC_TOKEN_LEFT_BRACKET) {
+			/* consumes the right-bracket */
+			err = parser_parse_declarator_array(this, &list);
+			if (err)
+				return err;
+			continue;
+		}
+
+		if (type == CC_TOKEN_RIGHT_PAREN) {
+			err = cc_token_stream_remove_head(stream, &token);
+			assert(err == ESUCCESS);
+			cc_token_delete(token);
+
+			node = NULL;
+			while (ptrq_num_entries(&stack)) {
+				node = ptrq_remove_tail(&stack);
+				if (cc_node_type(node) == CC_NODE_LEFT_PAREN)
+					break;
+				err = ptrq_add_tail(&list, node);
+				if (err)
+					return err;
+				node = NULL;
+			}
+			if (node == NULL)
+				return EINVAL;
+			cc_node_delete(node);	/* the left-paren */
+		}
+		assert(0);
+		return EINVAL;
 	}
-	return ENOTSUP;
+	d = cc_node_assert_type(out[0], CC_NODE_DECLARATOR);
+	d->list = list;
+	assert(err == ESUCCESS);
+	return err;
 }
 /*****************************************************************************/
 static
