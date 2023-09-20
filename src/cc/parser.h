@@ -360,6 +360,8 @@ struct cc_node_type_function {
 	struct cc_node	*type;	/* The return type */
 	struct cc_node	*block;
 	struct cc_node	*attributes;	/* FunctionDeclarator */
+	bool	is_inline;
+	bool	is_no_return;
 };
 
 /* These entries are stored in scope-sym-tab[enum_tags_ns] */

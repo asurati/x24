@@ -142,10 +142,23 @@ Declaration:	DeclarationSpecifiers	InitDeclaratorList	;
 Declaration:	AttributeSpecifierSequence	DeclarationSpecifiers	InitDeclaratorList	;
 Declaration:	StaticAssertDeclaration
 Declaration:	AttributeDeclaration
+# This AttributeSpecifierSequence appertains to each Declarator.
+# From the standard:
+# The optional attribute specifier sequence in a declaration appertains to
+# each of the entities declared by the declarators of the init declarator list.
 
 DeclarationSpecifiers:	DeclarationSpecifier
 DeclarationSpecifiers:	DeclarationSpecifier	AttributeSpecifierSequence
 DeclarationSpecifiers:	DeclarationSpecifier	DeclarationSpecifiers
+# This AttributeSpecifierSequence will always occur at the end of a
+# DeclarationSpecifiers non-terminal, and it appertains to the type determined
+# by the preceding sequence of specifiers.
+# From the standard:
+# The optional attribute specifier sequence terminating a sequence of
+# declaration specifiers appertains to the type determined by the preceding
+# sequence of declaration specifiers. The attribute specifier sequence affects
+# the type only for the declaration it appears in, not other declarations
+# involving the same type.
 
 DeclarationSpecifier:	StorageClassSpecifier
 DeclarationSpecifier:	TypeSpecifierQualifier
@@ -285,6 +298,18 @@ DirectDeclarator:	ArrayDeclarator
 DirectDeclarator:	ArrayDeclarator	AttributeSpecifierSequence
 DirectDeclarator:	FunctionDeclarator
 DirectDeclarator:	FunctionDeclarator	AttributeSpecifierSequence
+# Identifier	AttributeSpecifierSequence
+# From the standard:
+# ... the optional attribute specifier sequence appertains to the entity that
+# is declared.
+
+# ArrayDeclarator	AttributeSpecifierSequence
+# From the standard:
+# The optional attribute specifier sequence appertains to the array.
+
+# FunctionDeclarator	AttributeSpecifierSequence
+# From the standard:
+# The optional attribute specifier sequence appertains to the function type.
 
 ArrayDeclarator:	DirectDeclarator	[	]
 ArrayDeclarator:	DirectDeclarator	[	TypeQualifierList	]
@@ -310,6 +335,9 @@ Pointer:	*	Pointer
 Pointer:	*	AttributeSpecifierSequence	Pointer
 Pointer:	*	TypeQualifierList	Pointer
 Pointer:	*	AttributeSpecifierSequence	TypeQualifierList	Pointer
+# From the standard:
+# The optional attribute specifier sequence appertains to the pointer and not
+# the object pointed to.
 
 TypeQualifierList:	TypeQualifier
 TypeQualifierList:	TypeQualifierList	TypeQualifier

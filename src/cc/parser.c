@@ -214,7 +214,7 @@ struct cc_node *cc_node_new_block(const enum cc_scope scope)
 	return this;
 }
 
-static
+//static
 struct cc_node *cc_node_new_type_array(struct cc_node *type)
 {
 	struct cc_node *this, *attrs;
@@ -291,21 +291,20 @@ struct cc_node *cc_node_new_declaration_specifiers(void)
 {
 	int i;
 	err_t err;
-	struct cc_node *this, *nodes[10];
+	struct cc_node *this, *nodes[6];
 
 	this = cc_node_new(CC_NODE_DECLARATION_SPECIFIERS);
 	if (this == NULL)
 		return NULL;
 
-	/* Note the order */
+	/* Note the order: ts, tq, fs, ss, as, at. */
 	nodes[0] = cc_node_new_type_specifiers();
 	nodes[1] = cc_node_new_type_qualifiers();
 	nodes[2] = cc_node_new_function_specifiers();
 	nodes[3] = cc_node_new_storage_specifiers();
 	nodes[4] = cc_node_new_alignment_specifiers();
-	for (i = 5; i < 10; ++i)
-		nodes[i] = cc_node_new_attributes();
-	for (i = 0; i < 10; ++i) {
+	nodes[5] = cc_node_new_attributes();
+	for (i = 0; i < 6; ++i) {
 		if (nodes[i] == NULL)
 			return NULL;
 		err = cc_node_add_tail_child(this, nodes[i]);
@@ -1224,6 +1223,23 @@ err_t cc_token_stream_remove_head(struct cc_token_stream *this,
 }
 /*****************************************************************************/
 static
+bool parser_has_attributes(struct parser *this)
+{
+	err_t err;
+	struct cc_token_stream *stream;
+	struct cc_token *token;
+
+	stream = parser_token_stream(this);
+	err = cc_token_stream_peek_entry(stream, 0, &token);
+	if (err || cc_token_type(token) != CC_TOKEN_LEFT_BRACKET)
+		return false;
+	err = cc_token_stream_peek_entry(stream, 1, &token);
+	if (err || cc_token_type(token) != CC_TOKEN_LEFT_BRACKET)
+		return false;
+	return true;
+}
+/*****************************************************************************/
+static
 err_t parser_parse_static_assert_declaration(struct parser *this,
 											 struct cc_node *parent)
 {
@@ -1404,8 +1420,8 @@ err_t parser_parse_declaration_specifier(struct parser *this,
 	int i;
 	struct cc_token_stream *stream;
 	struct cc_token *token, *t;
-	struct cc_node *n[10], *attributes;
-	/* Ordering of the children: ts, tq, fs, ss, as, and then attrs */
+	struct cc_node *n[5];
+	/* Ordering of the children: ts, tq, fs, ss, as, at */
 	/* typedef err_t func(struct parser *, struct cc_node *); */
 	/* static func * const funcs[5] = { */
 	static err_t (* const funcs[5])(struct parser *, struct cc_node *) = {
@@ -1418,8 +1434,8 @@ err_t parser_parse_declaration_specifier(struct parser *this,
 
 	stream = parser_token_stream(this);
 	cc_node_assert_type(parent, CC_NODE_DECLARATION_SPECIFIERS);
-	assert(cc_node_num_children(parent) == 10);
-	for (i = 0; i < 10; ++i) {
+	assert(cc_node_num_children(parent) == 6);
+	for (i = 0; i < 5; ++i) {
 		n[i] = cc_node_peek_child(parent, i);
 		assert(n[i]);
 	}
@@ -1446,19 +1462,7 @@ err_t parser_parse_declaration_specifier(struct parser *this,
 		if (!err && cc_token_type(t) == CC_TOKEN_LEFT_PAREN)
 			i = 0;
 	}
-	err = funcs[i](this, n[i]);
-	if (err)
-		return err;
-
-	/* Does an AttributeSpecifierSequence follow? */
-	attributes = n[i + 5];
-	err = cc_token_stream_peek_head(stream, &token);
-	if (err)
-		return err;
-	if (cc_token_type(token) != CC_TOKEN_LEFT_BRACKET)
-		return err;	/* no attrs */
-	assert(0);	/* for now */
-	return parser_parse_attribute_specifiers(this, attributes);
+	return funcs[i](this, n[i]);
 }
 /*****************************************************************************/
 static
@@ -1469,14 +1473,14 @@ err_t parser_parse_declaration_specifiers(struct parser *this,
 	bool is_specifier;
 	const char *str;
 	struct ptr_queue stes;
-	const struct cc_symtab_entry *ste;
-	struct cc_node *node;
+	const struct cc_node *ste;
+	struct cc_node *node, *attributes;
 	struct cc_token_stream *stream;
 	struct cc_token *token;
 
 	/*
-	 * array of DeclarationSpecifier elements, each element optionally followed
-	 * by AttributeSpecifierSequence.
+	 * array of DeclarationSpecifier elements. The array may optionally end
+	 * with an AttributeSpecifierSequence
 	 */
 	ptrq_init(&stes, NULL);
 	stream = parser_token_stream(this);
@@ -1520,12 +1524,27 @@ err_t parser_parse_declaration_specifiers(struct parser *this,
 		err = parser_parse_declaration_specifier(this, node);
 		if (err)
 			return err;
+
+		/*
+		 * If an AttributeSpecifierSequence follows, that marks the end of the
+		 * DeclarationSpecifiers.
+		 * These attributes apply to the type specified by the preceding
+		 * specifiers.
+		 */
+		attributes = cc_node_peek_child(node, 5);
+		if (!parser_has_attributes(this))
+			continue;
+		err = parser_parse_attribute_specifiers(this, attributes);
+		if (err)
+			return err;
+		break;
 	}
 	assert(err == ESUCCESS);
 	out[0] = node;
 	return err;
 }
 /*****************************************************************************/
+/* This is not a function-definition */
 static
 err_t parser_parse_declaration(struct parser *this,
 							   struct cc_node *nodes[])
@@ -1534,6 +1553,10 @@ err_t parser_parse_declaration(struct parser *this,
 	(void)this;
 	(void)nodes;
 	return ENOTSUP;
+	// attributes, specifiers and one declarator.
+	// If specifiers have inline, then the given declarator and those that
+	// follow must all be for funct-types.
+	//
 }
 /*****************************************************************************/
 static
@@ -1576,17 +1599,17 @@ err_t parser_parse_type_pointer(struct parser *this,
 {
 	err_t err;
 	struct cc_token_stream *stream;
-	struct cc_token *tokens[2];
+	struct cc_token *token;
 	struct cc_node_type_pointer *tp;
 	struct cc_node *tq;
 
 	assert(out[0] == NULL);
 	stream = parser_token_stream(this);
 
-	err = cc_token_stream_remove_head(stream, &tokens[0]);
+	err = cc_token_stream_remove_head(stream, &token);
 	assert(err == ESUCCESS);
-	assert(cc_token_type(tokens[0]) == CC_TOKEN_MUL);
-	cc_token_delete(tokens[0]);
+	assert(cc_token_type(token) == CC_TOKEN_MUL);
+	cc_token_delete(token);
 
 	out[0] = cc_node_new_type_pointer(type);
 	if (out[0] == NULL)
@@ -1594,19 +1617,20 @@ err_t parser_parse_type_pointer(struct parser *this,
 	tp = cc_node_assert_type(out[0], CC_NODE_TYPE_POINTER);
 
 	/* Are there any AttributeSpecifiers for this pointer? */
-	err = cc_token_stream_peek_entry(stream, 0, &tokens[0]);
-	if (!err)
-		err = cc_token_stream_peek_entry(stream, 1, &tokens[1]);
-	if (!err &&
-		cc_token_type(tokens[0]) == CC_TOKEN_LEFT_BRACKET &&
-		cc_token_type(tokens[1]) == CC_TOKEN_LEFT_BRACKET)
+	if (parser_has_attributes(this)) {
+		/*
+		 * These attributes appertain to the pointer, and not to the
+		 * pointed-to object.
+		 */
 		err = parser_parse_attribute_specifiers(this, tp->attributes);
-	if (err)
-		return err;
+		if (err)
+			return err;
+		/* fallthrough */
+	}
 
-	/* Are there any TypeQualifier? Add the group as a child. */
-	err = cc_token_stream_peek_head(stream, &tokens[0]);
-	if (err || !cc_token_is_type_qualifier(tokens[0]))
+	/* Are there any TypeQualifiers? Add the group as a child. */
+	err = cc_token_stream_peek_head(stream, &token);
+	if (err || !cc_token_is_type_qualifier(token))
 		return ESUCCESS;	/* error handled later */
 
 	/* Collect all the TypeQualifiers into a single child */
@@ -1614,8 +1638,8 @@ err_t parser_parse_type_pointer(struct parser *this,
 	if (tq == NULL)
 		return ENOMEM;
 	while (true) {
-		err = cc_token_stream_peek_head(stream, &tokens[0]);
-		if (err || !cc_token_is_type_qualifier(tokens[0]))
+		err = cc_token_stream_peek_head(stream, &token);
+		if (err || !cc_token_is_type_qualifier(token))
 			break;	/* Any err handled later */
 		err = parser_parse_type_qualifier(this, tq);
 		if (err)
@@ -1624,13 +1648,21 @@ err_t parser_parse_type_pointer(struct parser *this,
 	return cc_node_add_tail_child(out[0], tq);
 }
 /*****************************************************************************/
+/*
+ * Caters to both ArrayDeclarator and AbstractArrayDeclarator.
+ * The caller must verify
+ */
 static
-err_t parser_parse_array(struct parser *this,
-						 struct cc_node *node)
+err_t parser_parse_type_array(struct parser *this,
+							  struct cc_node *ele_type,
+							  struct cc_node **out)
 {
 	assert(0);
 	(void)this;
-	(void)node;	/* type is type_array */
+	(void)ele_type;
+	(void)out;
+	/* TODO: AttributeSpecifierSequence */
+	/* These attributes appertain to the array type, not the array name. */
 	return ENOTSUP;
 }
 /*****************************************************************************/
@@ -1640,11 +1672,21 @@ err_t parser_parse_parameter_declaration(struct parser *this)
 	assert(0);
 	(void)this;
 	return ENOTSUP;
+	// parser_parse_declarator must handle both Declarator and
+	// AbstractDeclarator. It must monitor the arrival of either an Identifier
+	// or the place where it is supposed to be. Depending on what it finds,
+	// the output is a Declarator or an AbstractDeclarator
 }
 
+/*
+ * Caters to both FunctionDeclarator and AbstractFunctionDeclarator.
+ * The caller must verify.
+ * Parses only the prototype.
+ */
 static
-err_t parser_parse_function_parameters(struct parser *this,
-									   struct cc_node *node)
+err_t parser_parse_type_function(struct parser *this,
+								 struct cc_node *ret_type,
+								 struct cc_node **out)
 {
 	err_t err;
 	bool has_ellipsis;
@@ -1656,13 +1698,18 @@ err_t parser_parse_function_parameters(struct parser *this,
 	struct cc_node_block *b;
 	struct cc_node_symbols *ss;
 
+	assert(out[0] == NULL);
+	out[0] = cc_node_new_type_function(ret_type);
+	if (out[0] == NULL)
+		return ENOMEM;
+
 	stream = parser_token_stream(this);
 	err = cc_token_stream_remove_head(stream, &token);
 	assert(err == ESUCCESS);
 	assert(cc_token_type(token) == CC_TOKEN_LEFT_PAREN);
 	cc_token_delete(token);
 
-	tf = cc_node_assert_type(node, CC_NODE_TYPE_FUNCTION);
+	tf = cc_node_assert_type(out[0], CC_NODE_TYPE_FUNCTION);
 	b = cc_node_assert_type(tf->block, CC_NODE_BLOCK);
 	ss = cc_node_assert_type(b->symbols, CC_NODE_SYMBOLS);
 	assert(cc_node_symbols_scope(ss) == CC_SCOPE_PROTOTYPE);
@@ -1699,6 +1746,11 @@ err_t parser_parse_function_parameters(struct parser *this,
 			return EINVAL;
 		cc_token_delete(token);
 	}
+	/* TODO AttributeSpecifierSequence */
+	/*
+	 * These attributes appertain to the function-type and not the
+	 * function-name/identifier.
+	 */
 	assert(err == ESUCCESS);
 	this->symbols = symbols;	/* Revert back to the previous symtab */
 	return err;
@@ -1711,14 +1763,13 @@ err_t parser_parse_declarator_function(struct parser *this,
 	err_t err;
 	struct cc_node *node;
 
-	node = cc_node_new_type_function(NULL);	/* ret-type isn't known yet */
-	if (node == NULL)
-		return ENOMEM;
-	err = parser_parse_function_parameters(this, node);
-	if (!err)
-		err = ptrq_add_tail(list, node);
-	/* TODO: AttributeSpecifiers */
-	return err;
+	/* ret-type of the function not yet known */
+	node = NULL;
+	err = parser_parse_type_function(this, NULL, &node);
+	if (err)
+		return err;
+	/* TODO: Verify the structure of the node */
+	return ptrq_add_tail(list, node);
 }
 
 static
@@ -1728,14 +1779,13 @@ err_t parser_parse_declarator_array(struct parser *this,
 	err_t err;
 	struct cc_node *node;
 
-	node = cc_node_new_type_array(NULL);	/* ele-type isn't known yet */
-	if (node == NULL)
-		return ENOMEM;
-	err = parser_parse_array(this, node);
-	if (!err)
-		err = ptrq_add_tail(list, node);
-	/* TODO: AttributeSpecifiers */
-	return err;
+	/* ele-type of the array not yet known */
+	node = NULL;
+	err = parser_parse_type_array(this, NULL, &node);
+	if (err)
+		return err;
+	/* TODO: Verify the structure of the node */
+	return ptrq_add_tail(list, node);
 }
 
 static
@@ -1861,7 +1911,6 @@ err_t parser_parse_declarator(struct parser *this,
 	assert(err == ESUCCESS);
 	d = cc_node_assert_type(out[0], CC_NODE_DECLARATOR);
 	return ptrq_move(&list, &d->list);
-	return err;
 }
 /*****************************************************************************/
 static
@@ -1890,7 +1939,7 @@ err_t parser_parse_external_declaration(struct parser *this,
 
 	/* Is it an AttributeDeclaration? */
 	attributes = NULL;
-	if (cc_token_type(token) == CC_TOKEN_LEFT_BRACKET) {
+	if (parser_has_attributes(this)) {
 		attributes = cc_node_new_attributes();
 		if (attributes == NULL)
 			err = ENOMEM;
@@ -1912,6 +1961,8 @@ err_t parser_parse_external_declaration(struct parser *this,
 	/*
 	 * DeclarationSpecifiers indicate linkage, storage-duration and part of the
 	 * type of entities that the Declarators denote.
+	 * The attributes specified here apply to each entity in the
+	 * DeclaratorList.
 	 */
 	specifiers = declarator = definition = declaration = NULL;
 	err = parser_parse_declaration_specifiers(this, &specifiers);
