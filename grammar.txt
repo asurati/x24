@@ -171,6 +171,8 @@ InitDeclarator:	Declarator
 InitDeclarator:	Declarator	=	Initializer
 
 AttributeDeclaration:	AttributeSpecifierSequence	;
+# From the standard:
+# The attribute token fallthrough shall only appear in an attribute declaration
 
 StorageClassSpecifier:	auto
 StorageClassSpecifier:	constexpr
@@ -208,6 +210,9 @@ StructOrUnionSpecifier:	StructOrUnion	Identifier	{	MemberDeclarationList	}
 StructOrUnionSpecifier:	StructOrUnion	AttributeSpecifierSequence	Identifier	{	MemberDeclarationList	}
 StructOrUnionSpecifier:	StructOrUnion	Identifier
 StructOrUnionSpecifier:	StructOrUnion	AttributeSpecifierSequence	Identifier
+# From the standard:
+# The optional attribute specifier sequence in a struct-or-union specifier
+# appertains to the structure union type being declared.
 
 StructOrUnion:	struct
 StructOrUnion:	union
@@ -220,10 +225,17 @@ MemberDeclaration:	AttributeSpecifierSequence	SpecifierQualifierList	;
 MemberDeclaration:	SpecifierQualifierList	MemberDeclaratorList	;
 MemberDeclaration:	AttributeSpecifierSequence	SpecifierQualifierList	MemberDeclaratorList	;
 MemberDeclaration:	StaticAssertDeclaration
+# From the standard:
+# The optional attribute specifier sequence in a member declaration appertains
+# to each of the members declared by the member declarator list; it shall not
+# appear if the optional member declarator list is omitted.
 
 SpecifierQualifierList:	TypeSpecifierQualifier
 SpecifierQualifierList:	TypeSpecifierQualifier	AttributeSpecifierSequence
 SpecifierQualifierList:	TypeSpecifierQualifier	SpecifierQualifierList
+# From the standard:
+# The optional attribute specifier sequence in a specifier qualifier list
+# appertains to the type denoted by the preceding type specifier qualifiers.
 
 TypeSpecifierQualifier:	TypeSpecifier
 TypeSpecifierQualifier:	TypeQualifier
@@ -253,6 +265,10 @@ EnumSpecifier:	enum	AttributeSpecifierSequence	Identifier	{	EnumeratorList	,	}
 EnumSpecifier:	enum	AttributeSpecifierSequence	EnumTypeSpecifier	{	EnumeratorList	,	}
 EnumSpecifier:	enum	Identifier	EnumTypeSpecifier	{	EnumeratorList	,	}
 EnumSpecifier:	enum	AttributeSpecifierSequence	Identifier	EnumTypeSpecifier	{	EnumeratorList	,	}
+# From the standard:
+# The optional attribute specifier sequence in the enum specifier appertains to
+# the enumeration; the attributes in that attribute specifier sequence are
+# thereafter considered attributes of the enumeration whenever it is named. 
 
 EnumSpecifier:	enum	Identifier
 EnumSpecifier:	enum	Identifier	EnumTypeSpecifier
@@ -264,6 +280,9 @@ Enumerator:	EnumerationConstant
 Enumerator:	EnumerationConstant	AttributeSpecifierSequence
 Enumerator:	EnumerationConstant	=	ConstantExpression
 Enumerator:	EnumerationConstant	AttributeSpecifierSequence	=	ConstantExpression
+# From the standard:
+# The optional attribute specifier sequence in the enumerator appertains to
+# that enumerator.
 
 EnumerationConstant:	Identifier
 
@@ -325,6 +344,11 @@ ArrayDeclarator:	DirectDeclarator	[	static	TypeQualifierList	AssignmentExpressio
 ArrayDeclarator:	DirectDeclarator	[	TypeQualifierList	static	AssignmentExpression	]
 ArrayDeclarator:	DirectDeclarator	[	*	]
 ArrayDeclarator:	DirectDeclarator	[	TypeQualifierList	*	]
+# From the standard:
+# The optional type qualifiers and the keyword static shall appear only in a
+# declaration of a function parameter with an array type, and then only in the
+# outermost array type derivation.
+# This applies to TypeName too.
 
 FunctionDeclarator:	DirectDeclarator	(	)
 FunctionDeclarator:	DirectDeclarator	(	ParameterTypeList	)
@@ -358,6 +382,9 @@ ParameterDeclaration:	DeclarationSpecifiers
 ParameterDeclaration:	AttributeSpecifierSequence	DeclarationSpecifiers
 ParameterDeclaration:	DeclarationSpecifiers	AbstractDeclarator
 ParameterDeclaration:	AttributeSpecifierSequence	DeclarationSpecifiers	AbstractDeclarator
+# From the standard:
+# The optional attribute specifier sequence in a parameter declaration
+# appertains to the parameter.
 
 TypeName:	SpecifierQualifierList
 TypeName:	SpecifierQualifierList	AbstractDeclarator
@@ -371,6 +398,11 @@ DirectAbstractDeclarator:	ArrayAbstractDeclarator
 DirectAbstractDeclarator:	ArrayAbstractDeclarator	AttributeSpecifierSequence
 DirectAbstractDeclarator:	FunctionAbstractDeclarator
 DirectAbstractDeclarator:	FunctionAbstractDeclarator	AttributeSpecifierSequence
+# From the standard:
+# The optional attribute specifier sequence in a direct abstract declarator
+# appertains to the preceding array or function type. The attribute specifier
+# sequence affects the type only for the declaration it appears in, not other
+# declarations involving the same type.
 
 ArrayAbstractDeclarator:	[	]
 ArrayAbstractDeclarator:	[	TypeQualifierList	]

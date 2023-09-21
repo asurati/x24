@@ -308,7 +308,7 @@ struct cc_node_type_bit_field {
 
 struct cc_node_type_pointer {
 	struct cc_node	*type;	/* The referenced type */
-	struct cc_node	*attributes;	/* May have to add attrs to other types */
+	struct cc_node	*attributes;
 	/*
 	 * Note that TypeQualifiers, that can qualify a pointer, themselves
 	 * have their own symtab-entries.
@@ -437,6 +437,7 @@ struct cc_node_symbol {
 	enum cc_node_type	linkage;
 	enum cc_node_type	storage;
 	enum cc_name_space_type	name_space;
+	/* TODO: attributes here. */
 };
 
 /* Not all cc_node_types need a member in the union */

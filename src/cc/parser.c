@@ -1556,7 +1556,6 @@ err_t parser_parse_declaration(struct parser *this,
 	// attributes, specifiers and one declarator.
 	// If specifiers have inline, then the given declarator and those that
 	// follow must all be for funct-types.
-	//
 }
 /*****************************************************************************/
 static
