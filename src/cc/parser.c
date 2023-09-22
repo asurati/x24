@@ -16,6 +16,9 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/mman.h>
+static
+err_t parser_parse_declarator(struct parser *,
+							  struct cc_node **);
 /*****************************************************************************/
 /* From src/cpp/lexer.c */
 extern const char *g_key_words[];
@@ -717,6 +720,8 @@ err_t parser_build_types(struct parser *this)
 	struct cc_node_symbol *s;
 	struct cc_node_type_integer *ti;
 	static const enum cc_node_type types[] = {
+		CC_NODE_TYPE_VOID,
+
 		CC_NODE_TYPE_BOOL,
 		CC_NODE_TYPE_CHAR,
 		CC_NODE_TYPE_SHORT,
@@ -725,6 +730,8 @@ err_t parser_build_types(struct parser *this)
 		CC_NODE_TYPE_LONG_LONG,
 	};
 	static const struct cc_node_type_integer ints[] = {
+		{0, 0, 0, 0},		/* unused */
+
 		{8, 1, 7, 8},		/* bool */
 		{8, 7, 0, 8},		/* char */
 		{16, 15, 0, 16},	/* short */
@@ -743,15 +750,21 @@ err_t parser_build_types(struct parser *this)
 	ss = cc_node_assert_type(this->symbols, CC_NODE_SYMBOLS);
 	assert(cc_node_symbols_scope(ss) == CC_SCOPE_FILE);
 
+	cc_node_assert_type(n[0], CC_NODE_TYPE_VOID);
 	for (i = 0; i < (int)ARRAY_SIZE(types); ++i) {
-		n[0] = cc_node_new_type_integer(types[i]);
+		if (i > 0)
+			n[0] = cc_node_new_type_integer(types[i]);
+		else
+			n[0] = cc_node_new(types[i]);	/* CC_NODE_TYPE_VOID */
 		n[1] = cc_node_new_symbol(this->symbols);
 		if (n[0] == NULL || n[1] == NULL)
 			return ENOMEM;
-		ti = cc_node_assert_type(n[0], types[i]);
-		*ti = ints[i];
+		if (i > 0) {
+			ti = cc_node_assert_type(n[0], types[i]);
+			*ti = ints[i];
+		}
 		s = cc_node_assert_type(n[1], CC_NODE_SYMBOL);
-		s->value = n[0];
+		s->value = s->type = n[0];		/* For types, value == type. */
 		s->linkage = CC_LINKAGE_NONE;	/* types have no linkages */
 		s->storage = CC_STORAGE_NONE;	/* types have no storage duration */
 		s->name_space = CC_NAME_SPACE_ORDINARY;
@@ -1542,6 +1555,17 @@ err_t parser_parse_declaration_specifiers(struct parser *this,
 	return err;
 }
 /*****************************************************************************/
+#if 0
+static
+err_t parser_process_declaration(struct parser *this,
+								 struct cc_node *nodes[])
+{
+	assert(0);
+	(void)this;
+	(void)nodes;
+	return ENOTSUP;
+}
+#endif
 /* This is not a function-definition */
 static
 err_t parser_parse_declaration(struct parser *this,
@@ -1665,64 +1689,61 @@ err_t parser_parse_type_array(struct parser *this,
 }
 /*****************************************************************************/
 /*
- * The function updates the symbol table instead of returning any objects */
+ * The unnamed param of type void is allowed only if it is the only parameter.
+ * A parameter whose type is incomplete may have to be warned about.
+ */
+static
+err_t parser_process_parameter_declaration(struct parser *this,
+										   struct cc_node *nodes[])
+{
+	assert(0);
+	(void)this;
+	(void)nodes;
+	return ENOTSUP;
+}
+
+/* The function updates the symbol table instead of returning any objects. */
 static
 err_t parser_parse_parameter_declaration(struct parser *this)
 {
-#if 0
 	err_t err;
 	struct cc_token_stream *stream;
 	struct cc_token *token;
 	struct cc_node *attributes;
 	struct cc_node *specifiers;
 	struct cc_node *declarator;
-	struct cc_node *definition;
-	struct cc_node *declaration;
-	struct cc_node *nodes[5];
+	struct cc_node *nodes[4];
 
 	stream = &this->stream;
 
 	/* Is it an AttributeDeclaration? */
-	attributes = NULL;
+	attributes = specifiers = declarator = NULL;
 	if (parser_has_attributes(this)) {
 		err = parser_parse_attribute_specifiers(this, &attributes);
 		if (err)
 			return err;
 	}
 
-	specifiers = declarator = definition = declaration = NULL;
+	/* Only DeclarationSpecifiers is guaranteed to be present */
 	err = parser_parse_declaration_specifiers(this, &specifiers);
-	if (err)
-		return err;
-
-	/* If attributes is non-NULL, then there must be at least one declarator */
-	nodes[0] = parent;		/* TranslationUnit */
-	nodes[1] = attributes;	/* may be null */
-	nodes[2] = specifiers;
+	if (!err)
+		cc_node_assert_type(specifiers, CC_NODE_DECLARATION_SPECIFIERS);
+	if (!err)
+		assert(cc_node_num_children(specifiers) == 5);
+	if (!err)
+		err = cc_token_stream_peek_head(stream, &token);
+	/* If a comma or a right-paren follows, then there's no Declarator */
+	if (!err &&
+		cc_token_type(token) != CC_TOKEN_COMMA &&
+		cc_token_type(token) != CC_TOKEN_RIGHT_PAREN)
+		err = parser_parse_declarator(this, &declarator);
+	nodes[0] = attributes;	/* may be null */
+	nodes[1] = specifiers;
+	nodes[2] = declarator;
 	nodes[3] = NULL;
-	err = cc_token_stream_peek_head(stream, &token);
-	if (err)
-		return err;
-
-	/* Declaration: DeclarationSpecifiers ; */
-	if (attributes == NULL && cc_token_type(token) == CC_TOKEN_SEMI_COLON)
-		return parser_parse_declaration(this, nodes);
-
-	/* Parse a single Declarator first */
-	err = parser_parse_declarator(this, &declarator);
-	if (err)
-		return err;
-	nodes[3] = declarator;
-	nodes[4] = NULL;
-	err = cc_token_stream_peek_head(stream, &token);
-	if (err)
-		return err;
-	if (cc_token_type(token) == CC_TOKEN_LEFT_BRACE)
-		return parser_parse_function_definition(this, nodes);
-	return parser_parse_declaration(this, nodes);
-#endif
-	(void)this;
-	return ENOTSUP;
+	if (!err)
+		err = parser_process_parameter_declaration(this, nodes);
+	return err;
 }
 
 /*
@@ -1745,6 +1766,12 @@ err_t parser_parse_type_function(struct parser *this,
 	struct cc_node_block *b;
 	struct cc_node_symbols *ss;
 
+	/*
+	 * The ret-type is the actual type specified in the source, but 6.7.6.3
+	 * ways that the ret-type must be unqualified and non-atomic; i.e., we must
+	 * remove any type-qualifiers including _Atomic qualifier from the type.
+	 * The resultant type is then the type of the function.
+	 */
 	assert(out[0] == NULL);
 	out[0] = cc_node_new_type_function(ret_type);
 	if (out[0] == NULL)
@@ -1761,6 +1788,14 @@ err_t parser_parse_type_function(struct parser *this,
 	ss = cc_node_assert_type(b->symbols, CC_NODE_SYMBOLS);
 	assert(cc_node_symbols_scope(ss) == CC_SCOPE_PROTOTYPE);
 
+	/*
+	 * The function's symbol-table is a child of the current symtab.
+	 * This helps in processing parameters, as that requires looking up
+	 * types.
+	 */
+	err = cc_node_add_tail_child(this->symbols, b->symbols);
+	if (err)
+		return err;
 	symbols = this->symbols;	/* Save the current symbol-table */
 	this->symbols = b->symbols;	/* Set the new symbol-table */
 	has_ellipsis = false;
@@ -2019,7 +2054,7 @@ err_t parser_parse_external_declaration(struct parser *this,
 	struct cc_node *declarator;
 	struct cc_node *definition;
 	struct cc_node *declaration;
-	struct cc_node *nodes[5];
+	struct cc_node *nodes[4];
 
 	cc_node_assert_type(parent, CC_NODE_TRANSLATION_UNIT);
 
@@ -2060,10 +2095,9 @@ err_t parser_parse_external_declaration(struct parser *this,
 		return err;
 
 	/* If attributes is non-NULL, then there must be at least one declarator */
-	nodes[0] = parent;		/* TranslationUnit */
-	nodes[1] = attributes;	/* may be null */
-	nodes[2] = specifiers;
-	nodes[3] = NULL;
+	nodes[0] = attributes;	/* may be null */
+	nodes[1] = specifiers;
+	nodes[2] = NULL;
 	err = cc_token_stream_peek_head(stream, &token);
 	if (err)
 		return err;
@@ -2079,9 +2113,8 @@ err_t parser_parse_external_declaration(struct parser *this,
 
 	/* Should not be an AbstractDeclarator */
 	assert(cc_node_type(declarator) == CC_NODE_DECLARATOR);
-
-	nodes[3] = declarator;
-	nodes[4] = NULL;
+	nodes[2] = declarator;
+	nodes[3] = NULL;
 	err = cc_token_stream_peek_head(stream, &token);
 	if (err)
 		return err;

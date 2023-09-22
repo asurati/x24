@@ -234,6 +234,13 @@ struct cc_node_alignment_specifiers {
 	struct cc_node	*expression;
 };
 
+/*
+ * type is useful for those TypeSpecifiers that are not simple single-token
+ * identifiers. Such as struct/union etc.
+ * For e.g., when parsing a struct/union, parser_parse_type_specifier_struct
+ * will create the type in the appropriate symtab, and then
+ * point type to the symtab entry.
+ */
 struct cc_node_type_specifiers {
 	int	mask;
 	struct cc_node	*type;
@@ -405,7 +412,7 @@ enum cc_scope {
 	CC_SCOPE_FILE,
 	CC_SCOPE_BLOCK,
 	CC_SCOPE_PROTOTYPE,
-	CC_SCOPE_MEMBER,
+	CC_SCOPE_MEMBER,	/* Only *_MEMBER name-space is filled */
 };
 
 struct cc_node_symbols {
@@ -426,12 +433,20 @@ enum cc_scope cc_node_symbols_scope(const struct cc_node_symbols *this)
 #define CC_STORAGE_THREAD_LOCAL	CC_NODE_THREAD_LOCAL
 #define CC_STORAGE_STATIC		CC_NODE_STATIC
 
-/* A symbol is a name-value pair */
+/*
+ * A symbol is a name-value pair.
+ * For a type, type == value. This is how types are recognized.
+ * For identifiers (excluding type-defs) that are types, type and value point
+ * to the type cc_node.
+ * For type-defs and identifiers that are not types, type points to the
+ * symtab-entry that contains the symbol for the type.
+ */
 struct cc_node_symbol {
 	struct cc_node	*symbols;		/* The table containing this entry */
 	struct cc_node	*prev;			/* used to link same-name declarations */
 	struct cc_node	*identifier;	/* an identifier, or null */
-	struct cc_node	*value;			/* must not be null */
+	struct cc_node	*type;			/* must not be null */
+	struct cc_node	*value;			/* prob. an expression */
 	enum cc_node_type	linkage;
 	enum cc_node_type	storage;
 	enum cc_name_space_type	name_space;
