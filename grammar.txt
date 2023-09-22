@@ -146,6 +146,9 @@ Declaration:	AttributeDeclaration
 # From the standard:
 # The optional attribute specifier sequence in a declaration appertains to
 # each of the entities declared by the declarators of the init declarator list.
+# In the declaration for an entity, attributes appertaining to that entity may
+# appear at the start of the declaration and after the identifier for that
+# declaration.
 
 DeclarationSpecifiers:	DeclarationSpecifier
 DeclarationSpecifiers:	DeclarationSpecifier	AttributeSpecifierSequence
@@ -182,6 +185,10 @@ StorageClassSpecifier:	static
 StorageClassSpecifier:	thread_local
 StorageClassSpecifier:	typedef
 # typedef is in StorageClassSpecifier for syntactic convenience only.
+# A typedef name shares the same name space as other identifiers declared in
+# ordinary declarators.
+# Storage-class specifiers specify various properties of identifiers and
+# declared features:
 
 TypeSpecifier:	void
 TypeSpecifier:	char
@@ -268,7 +275,7 @@ EnumSpecifier:	enum	AttributeSpecifierSequence	Identifier	EnumTypeSpecifier	{	En
 # From the standard:
 # The optional attribute specifier sequence in the enum specifier appertains to
 # the enumeration; the attributes in that attribute specifier sequence are
-# thereafter considered attributes of the enumeration whenever it is named. 
+# thereafter considered attributes of the enumeration whenever it is named.
 
 EnumSpecifier:	enum	Identifier
 EnumSpecifier:	enum	Identifier	EnumTypeSpecifier
@@ -306,6 +313,10 @@ FunctionSpecifier:	inline
 # From the standard:
 # The _Noreturn function specifier is an obsolescent feature.
 # The attribute [[noreturn]] provides similar semantics.
+# Function specifiers shall be used only in the declaration of an identifier
+# for a function
+# That is, inline doesn't apply to function-type but to the identifier
+# that is of function-type.
 
 AlignmentSpecifier:	alignas	(	TypeName	)
 AlignmentSpecifier:	alignas	(	ConstantExpression	)
@@ -519,6 +530,8 @@ Label:	default	:
 Label:	AttributeSpecifierSequence	Identifier	:
 Label:	AttributeSpecifierSequence	case	ConstantExpression	:
 Label:	AttributeSpecifierSequence	default	:
+# From the standard:
+# The optional attribute specifier sequence appertains to the label.
 
 LabeledStatement:	Label	Statement
 

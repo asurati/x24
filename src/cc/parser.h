@@ -308,16 +308,14 @@ struct cc_node_type_bit_field {
 
 struct cc_node_type_pointer {
 	struct cc_node	*type;	/* The referenced type */
-	struct cc_node	*attributes;
 	/*
-	 * Note that TypeQualifiers, that can qualify a pointer, themselves
-	 * have their own symtab-entries.
+	 * Note that TypeQualifiers and attributes, that can qualify a pointer,
+	 * themselves have their own symtab-entries.
 	 */
 };
 
 struct cc_node_type_array {
 	struct cc_node	*type;	/* The element type */
-	struct cc_node	*attributes;	/* See ArrayDeclarator */
 
 	/* These vars collect info present between [ and ] */
 	struct cc_node	*expression;	/* The assignment-expression */
@@ -330,10 +328,12 @@ struct cc_node_type_array {
  * Used for both struct/union. Enum has the same symtab as entry.parent.
  * The alignment of a struct can be recursively found using the alignment
  * of its first member.
+ *
+ * The members of an anonymous structure or union are members of the containing
+ * structure or union, keeping their structure or union layout.
  */
 struct cc_node_type_struct {
 	struct cc_node	*symbols;
-	struct cc_node	*attributes;	/* See StructOrUnionSpecifier */
 };
 
 /*
@@ -359,7 +359,6 @@ struct cc_node_block {
 struct cc_node_type_function {
 	struct cc_node	*type;	/* The return type */
 	struct cc_node	*block;
-	struct cc_node	*attributes;	/* FunctionDeclarator */
 	bool	is_inline;
 	bool	is_no_return;
 };
@@ -367,7 +366,6 @@ struct cc_node_type_function {
 /* These entries are stored in scope-sym-tab[enum_tags_ns] */
 struct cc_node_type_enum {
 	struct cc_node	*type;	/* underlying type */
-	struct cc_node	*attributes;	/* See EnumSpecifier */
 
 	/* Pointers to symtab-entries that define the enum constants */
 	struct ptr_queue	constants;
@@ -437,7 +435,6 @@ struct cc_node_symbol {
 	enum cc_node_type	linkage;
 	enum cc_node_type	storage;
 	enum cc_name_space_type	name_space;
-	/* TODO: attributes here. */
 };
 
 /* Not all cc_node_types need a member in the union */
@@ -451,6 +448,11 @@ struct cc_node {
 		struct cc_node_string_literal	*string_literal;
 		struct cc_node_identifier		*identifier;
 
+		/*
+		 * These are collectors of information during parsing. They are not
+		 * found in symtabs. Attributes are found in the type-trees when they
+		 * modify an Identifier or a Type.
+		 */
 		struct cc_node_attributes				*attributes;
 		struct cc_node_type_specifiers			*type_specifiers;
 		struct cc_node_type_qualifiers			*type_qualifiers;
@@ -458,6 +460,7 @@ struct cc_node {
 		struct cc_node_storage_specifiers		*storage_specifiers;
 		struct cc_node_alignment_specifiers		*alignment_specifiers;
 		struct cc_node_declarator				*declarator;
+		/* Declarator also functions as AbstractDeclarator */
 
 		struct cc_node_type_integer		*type_integer;
 		struct cc_node_type_bit_field	*type_bit_field;
