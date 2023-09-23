@@ -2060,6 +2060,7 @@ err_t parser_parse_declarator(struct parser *this,
 			if (node == NULL)
 				return EINVAL;
 			cc_node_delete(node);	/* the left-paren */
+			continue;
 		}
 
 		/* We have left-paren, and neither the identifier nor its location. */
