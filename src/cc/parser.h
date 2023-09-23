@@ -258,6 +258,15 @@ struct cc_node_storage_specifiers {
 	int	mask;
 };
 
+struct cc_node_declaration_specifiers {
+	struct cc_node	*type_specifiers;
+	struct cc_node	*type_qualifiers;
+	struct cc_node	*function_specifiers;
+	struct cc_node	*storage_specifiers;
+	struct cc_node	*alignment_specifiers;
+	struct cc_node	*attributes;
+};
+
 struct cc_node_declarator {
 	struct ptr_queue	list;	/* type-list cc_node * */
 };
@@ -474,6 +483,7 @@ struct cc_node {
 		struct cc_node_function_specifiers		*function_specifiers;
 		struct cc_node_storage_specifiers		*storage_specifiers;
 		struct cc_node_alignment_specifiers		*alignment_specifiers;
+		struct cc_node_declaration_specifiers	*declaration_specifiers;
 		struct cc_node_declarator				*declarator;
 		/* Declarator also functions as AbstractDeclarator */
 
