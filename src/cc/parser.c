@@ -1979,14 +1979,13 @@ err_t parser_parse_declarator(struct parser *this,
 	/* The operand-stack need only store cc_token_type enums */
 	ptrq_init(&stack, NULL);
 	ptrq_init(&list, NULL);	/* destructor not needed; items moved */
-	ident_found = is_abstract_delarator = false;
+	ident_found = false;
+	is_abstract_delarator = false;
 	while (true) {
 		err = cc_token_stream_peek_head(stream, &token);
 		if (err)
 			return err;
-		/* We do not expect key-words here */
 		assert(!cc_token_is_key_word(token));
-
 		type = cc_token_type(token);
 		if (type == CC_TOKEN_IDENTIFIER) {
 			/* Can't have two idents */
@@ -2029,6 +2028,7 @@ err_t parser_parse_declarator(struct parser *this,
 			err = parser_parse_declarator_function(this, &list);
 			if (err)
 				return err;
+			/* No need to update was_prev_left_paren after ident is found. */
 			continue;
 		}
 
@@ -2064,17 +2064,35 @@ err_t parser_parse_declarator(struct parser *this,
 
 		/* We have left-paren, and neither the identifier nor its location. */
 		if (type == CC_TOKEN_LEFT_PAREN && !ident_found) {
-			err = cc_token_stream_remove_head(stream, &token);
-			assert(err == ESUCCESS);
-			cc_token_delete(token);
-
-			/* This is a precedence-ordering paren */
-			node = cc_node_new(CC_NODE_LEFT_PAREN);
-			if (node == NULL)
-				return ENOMEM;
-			err = ptrq_add_tail(&stack, node);
+			/*
+			 * If a ( or a * follows this (, then continue.
+			 * else, we now have a location of the identifier
+			 */
+			err = cc_token_stream_peek_entry(stream, 1, &token);
 			if (err)
 				return err;
+			type = cc_token_type(token);
+			if (type == CC_TOKEN_LEFT_PAREN ||
+				type == CC_TOKEN_MUL) {
+				/* This is a precedence-ordering paren */
+				err = cc_token_stream_remove_head(stream, &token);
+				assert(err == ESUCCESS);
+				cc_token_delete(token);
+				node = cc_node_new(CC_NODE_LEFT_PAREN);
+				if (node == NULL)
+					return ENOMEM;
+				err = ptrq_add_tail(&stack, node);
+				if (err)
+					return err;
+				continue;
+			}
+
+			/*
+			 * The ident-location is to the imm-left of this (.
+			 * Keep that token within the input, and rescan.
+			 */
+			ident_found = is_abstract_delarator = true;
+			assert(ptrq_num_entries(&list) == 0);
 			continue;
 		}
 
@@ -2082,6 +2100,7 @@ err_t parser_parse_declarator(struct parser *this,
 		if (type == CC_TOKEN_LEFT_BRACKET && !ident_found) {
 			ident_found = is_abstract_delarator = true;
 			assert(ptrq_num_entries(&list) == 0);
+			/* The ident-locn is to the imm-left of the left-bracket */
 			continue;	/* Retry parsing [ */
 		}
 
@@ -2089,26 +2108,8 @@ err_t parser_parse_declarator(struct parser *this,
 		if (type == CC_TOKEN_RIGHT_PAREN && !ident_found) {
 			ident_found = is_abstract_delarator = true;
 			assert(ptrq_num_entries(&list) == 0);
-			/*
-			 * If the pair of parentheses is empty, the identifier is to the
-			 * immediate left of the left-paren, else it is to the immediate
-			 * left of the right-paren.
-			 */
-			assert(ptrq_num_entries(&stack));
-			node = ptrq_peek_tail(&stack);
-			if (cc_node_type(node) == CC_NODE_LEFT_PAREN) {
-				node = ptrq_remove_tail(&stack);
-				cc_node_delete(node);
-				token = malloc(sizeof(*token));
-				if (token == NULL)
-					return ENOMEM;
-				cc_token_init(token);
-				token->type = CC_TOKEN_LEFT_PAREN;
-				err = cc_token_stream_add_head(stream, token);
-				if (err)
-					return err;
-			}
-			continue;	/* Retry parsing either ) or () */
+			/* The ident-locn is to the imm-left of the right-paren */
+			continue;	/* Retry parsing ) */
 		}
 		assert(0);
 		return EINVAL;

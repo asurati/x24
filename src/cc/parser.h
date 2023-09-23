@@ -230,8 +230,8 @@ struct cc_node_attributes {
 };
 
 struct cc_node_alignment_specifiers {
-	struct cc_node	*type;
-	struct cc_node	*expression;
+	struct cc_node	*type;			/* alignas(TypeName) */
+	struct cc_node	*expression;	/* alignas(ConstantExpression) */
 };
 
 /*
