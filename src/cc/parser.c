@@ -1578,6 +1578,25 @@ err_t parser_process_declaration_type_def(struct parser *this,
 	return ENOTSUP;
 }
 
+/*
+ * A Declaration ... shall declare at least a declarator(other than
+ * declarators that are params of a func, or are members of struct/union),
+ * a tag, or a member of  enumeration.
+ *
+ * struct { int a; }; is invalid - it has no Declarator, its
+ * DeclarationSpecifiers contain an unnamed struct (hence no tag), and its no
+ * enum.
+ *
+ * enum; is invalid - it has no Declarator; its DeclarationSpecifiers contains
+ * an unnamed enum with no members.
+ *
+ * Thus, if the DeclarationSpecifiers has a tag, then the above condn is
+ * satisfied.
+ * Else, there's no tag. Then, if the DeclarationSpecifiers is an unnamed enum
+ * with a constant, then the condn is satisfied.
+ * Else, if there's a Declarator then the condn is satisfied.
+ * Else, the condn is not satsified.
+ */
 static
 err_t parser_process_declaration(struct parser *this,
 								 struct ptr_queue *nodes)
