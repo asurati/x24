@@ -101,7 +101,9 @@ const char *g_punctuators[] = {
 	"...",
 };
 
+/* These are all key-words for lexer. */
 const char *g_key_words[] = {
+	/* c-key-words */
 	"_Atomic",
 	"_BitInt",
 	"_Complex",
@@ -156,7 +158,7 @@ const char *g_key_words[] = {
 	"volatile",
 	"while",
 
-	/* std-attributes. These are not key-words */
+	/* std-attributes. These are not c-key-words */
 	"noreturn",
 	"deprecated",
 	"fallthrough",
@@ -165,8 +167,7 @@ const char *g_key_words[] = {
 	"unsequenced",
 	"reproducible",
 
-	/* CPP key-words */
-
+	/* cpp-key-words, but not c-key-words */
 	/* Mandatory macros */
 	"__DATE__",
 	"__FILE__",

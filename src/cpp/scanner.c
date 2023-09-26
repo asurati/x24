@@ -3205,20 +3205,9 @@ err_t scanner_serialize_cpp_token(struct scanner *this,
 	type = cpp_token_type(token);
 
 	/*
-	 * A program can contain a varaible named 'line', which the scanner
-	 * identifies as LXR_TOKEN_DIRECTIVE_LINE, but for c 'line' isn't a
-	 * key-word, hence it must be converted to identifier. There may be other
-	 * such cpp-keywords that may need fixing before serializing the token.
-	 * No cpp-token-type must be passed forward to the compiler.
-	 *
-	 * For e.g. int elifdef = 0; is valid c code. The assert prevents moving
-	 * forward, for now. Must fix.
-	 *
-	 * TODO.
+	 * Do not write source for punctuators and lexer-key-words.
+	 * This helps keep the output-file-size small.
 	 */
-	if (type == LXR_TOKEN_DIRECTIVE_LINE)
-		type = LXR_TOKEN_IDENTIFIER;
-	assert(type < LXR_TOKEN_DATE || type > LXR_TOKEN_UNARY_MINUS);
 
 	/* First write the lexer_token type */
 	buf = &type;
@@ -3227,12 +3216,13 @@ err_t scanner_serialize_cpp_token(struct scanner *this,
 	if (ret < 0)
 		return errno;
 
-	/* Write nothing more for c-keywords and punctuators */
-	if (cpp_token_is_c_key_word(token) ||
+	/* Write nothing more for lexer keywords and punctuators */
+	if (cpp_token_is_key_word(token) ||
 		cpp_token_is_punctuator(token))
 		return ESUCCESS;
 
 	src_len = cpp_token_source_length(token);
+	assert(src_len);
 
 	/* Write source_len. */
 	buf = &src_len;
@@ -3242,8 +3232,10 @@ err_t scanner_serialize_cpp_token(struct scanner *this,
 		return errno;
 
 	/* If the source_len is not 0, then write the source. */
+#if 0
 	if (src_len == 0)
 		return ESUCCESS;
+#endif
 
 	/*
 	 * If the type is identifier, write its resolved source.
