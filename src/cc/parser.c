@@ -1129,17 +1129,16 @@ err_t cc_token_stream_read_token(struct cc_token_stream *this,
 	/* cc_token_type_is_key_word only checks for c-key-words */
 	if (cc_token_type_is_key_word(type) ||
 		cc_token_type_is_punctuator(type)) {
-		/* c-key-words, punctuators, do not alloc string */
+		/* These are lexer-key-words and punctuators. No src-len. */
 		token->string = NULL;
 		token->string_len = 0;
 		goto done;
 	}
 
 	/*
-	 * These ranges are converted into identifiers:
+	 * These ranges of lexer-key-words are converted into identifiers:
 	 * [LXR_TOKEN_NO_RETURN, LXR_TOKEN_REPRODUCIBLE]
 	 * [LXR_TOKEN_DIRECTIVE_DEFINE, LXR_TOKEN_DIRECTIVE_WARNING]
-	 * This range must be converted to an Identifier.
 	 */
 	is_ident = false;
 	if (!is_ident &&
@@ -1151,6 +1150,7 @@ err_t cc_token_stream_read_token(struct cc_token_stream *this,
 		type <= CC_TOKEN_DIRECTIVE_WARNING)
 		is_ident = true;
 	if (is_ident) {
+		/* These are lexer-key-words. No src-len */
 		token->string = src = strdup(g_key_words[type - CC_TOKEN_ATOMIC]);
 		if (src == NULL)
 			return ENOMEM;
