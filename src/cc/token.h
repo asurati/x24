@@ -46,23 +46,9 @@ bool cc_token_type_is_punctuator(const enum cc_token_type this)
 }
 
 static inline
-bool cc_token_type_is_standard_attribute(const enum cc_token_type this)
-{
-	return (this == CC_TOKEN_NO_RETURN ||
-			this == CC_TOKEN_DEPRECATED ||
-			this == CC_TOKEN_FALL_THROUGH ||
-			this == CC_TOKEN_NO_DISCARD ||
-			this == CC_TOKEN_MAY_BE_UNUSED ||
-			this == CC_TOKEN_UNSEQUENCED ||
-			this == CC_TOKEN_REPRODUCIBLE);
-}
-
-static inline
 bool cc_token_type_is_identifier(const enum cc_token_type this)
 {
-	return (cc_token_type_is_key_word(this) ||
-			cc_token_type_is_standard_attribute(this) ||
-			this == CC_TOKEN_IDENTIFIER);
+	return this == CC_TOKEN_IDENTIFIER;
 }
 
 static inline
@@ -204,12 +190,6 @@ static inline
 bool cc_token_is_punctuator(const struct cc_token *this)
 {
 	return cc_token_type_is_punctuator(cc_token_type(this));
-}
-
-static inline
-bool cc_token_is_standard_attribute(const struct cc_token *this)
-{
-	return cc_token_type_is_standard_attribute(cc_token_type(this));
 }
 
 static inline

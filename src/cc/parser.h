@@ -112,7 +112,7 @@ enum cc_node_type {
 #undef DEF
 #undef NODE
 };
-
+#if 0
 static inline
 bool cc_node_type_is_terminal(const enum cc_node_type this)
 {
@@ -125,7 +125,7 @@ bool cc_node_type_is_non_terminal(const enum cc_node_type this)
 {
 	return !cc_node_type_is_terminal(this);
 }
-
+#endif
 static inline
 bool cc_node_type_is_key_word(const enum cc_node_type this)
 {
@@ -141,7 +141,7 @@ bool cc_node_type_is_punctuator(const enum cc_node_type this)
 static inline
 bool cc_node_type_is_identifier(const enum cc_node_type this)
 {
-	return this == CC_NODE_IDENTIFIER || cc_node_type_is_key_word(this);
+	return this == CC_NODE_IDENTIFIER;
 }
 
 static inline
@@ -165,7 +165,13 @@ bool cc_node_type_is_number(const enum cc_node_type this)
 }
 
 static inline
-bool cc_node_type_is_storage_class_specifier(const enum cc_node_type this)
+bool cc_node_type_is_symbol(const enum cc_node_type this)
+{
+	return this >= CC_NODE_SYMBOL && this <= CC_NODE_SYMBOL_TYPE_DEF;
+}
+
+static inline
+bool cc_node_type_is_storage_specifier(const enum cc_node_type this)
 {
 	return (this == CC_NODE_AUTO ||
 			this == CC_NODE_CONST_EXPR ||
@@ -225,32 +231,12 @@ bool cc_node_type_is_function_specifier(const enum cc_node_type this)
 }
 /*****************************************************************************/
 struct cc_node;
-struct cc_node_attributes {
-	int	mask;
-};
-
-struct cc_node_alignment_specifiers {
-	struct cc_node	*type;			/* alignas(TypeName) */
-	struct cc_node	*expression;	/* alignas(ConstantExpression) */
-};
-
-/*
- * type is useful for those TypeSpecifiers that are not simple single-token
- * identifiers. Such as struct/union etc.
- * For e.g., when parsing a struct/union, parser_parse_type_specifier_struct
- * will create the type in the appropriate symtab, and then
- * point type to the symtab entry.
- */
 struct cc_node_type_specifiers {
-	int	mask;
 	struct cc_node	*type;
+	int	mask;
 };
 
 struct cc_node_type_qualifiers {
-	int	mask;
-};
-
-struct cc_node_function_specifiers {
 	int	mask;
 };
 
@@ -258,13 +244,22 @@ struct cc_node_storage_specifiers {
 	int	mask;
 };
 
+struct cc_node_function_specifiers {
+	int	mask;
+};
+
+struct cc_node_attributes {
+	int	mask;
+};
+
 struct cc_node_declaration_specifiers {
+	struct cc_node	*type;
 	struct cc_node	*type_specifiers;
-	struct cc_node	*type_qualifiers;
-	struct cc_node	*function_specifiers;
-	struct cc_node	*storage_specifiers;
-	struct cc_node	*alignment_specifiers;
-	struct cc_node	*attributes;
+	struct cc_node	*type_qualifiers;		/* applies to type */
+	struct cc_node	*attributes;	/* applies to type */
+	struct cc_node	*storage_specifiers;	/* applies to ident */
+	struct cc_node	*function_specifiers;	/* applies to ident */
+	int	alignment;	/* applies to type */
 };
 
 struct cc_node_declarator {
@@ -298,6 +293,9 @@ struct cc_node_string_literal {
 struct cc_node_identifier {
 	const char	*string;
 	size_t		string_len;	/* doesn't include the terminated nul */
+	struct cc_node	*symbol;
+	struct cc_node	*function_specifiers;
+	struct cc_node	*attributes;
 };
 
 /*
@@ -322,19 +320,11 @@ struct cc_node_type_bit_field {
 	int	offset;	/* offset from start of the rep. of the underlying type */
 };
 
-struct cc_node_type_pointer {
-	struct cc_node	*type;	/* The referenced type */
-	/*
-	 * Note that TypeQualifiers and attributes, that can qualify a pointer,
-	 * themselves have their own symtab-entries.
-	 */
-};
-
 struct cc_node_type_array {
-	struct cc_node	*type;	/* The element type */
+	size_t	num_elements;
 
 	/* These vars collect info present between [ and ] */
-	struct cc_node	*expression;	/* The assignment-expression */
+	struct cc_node	*expr;
 	struct cc_node	*type_qualifiers;
 	bool	has_static;
 	bool	is_vla;
@@ -368,23 +358,14 @@ struct cc_node_block {
 	struct cc_node	*symbols;
 };
 
-/*
- * Used for both func-decl and func-defn. param-names are placed in the
- * ordinary name space.
- */
+/* no need for a separate cc_node_type_pointer structure */
+
 struct cc_node_type_function {
-	struct cc_node	*type;	/* The return type */
 	struct cc_node	*block;
-	bool	is_inline;
-	bool	is_no_return;
 };
 
 /* These entries are stored in scope-sym-tab[enum_tags_ns] */
 struct cc_node_type_enum {
-	struct cc_node	*type;	/* underlying type */
-
-	/* Pointers to symtab-entries that define the enum constants */
-	struct ptr_queue	constants;
 	bool	is_fixed;	/* is the underlying type fixed */
 };
 
@@ -394,10 +375,6 @@ struct cc_node_object {
 	/* For enum-constants, type points back to the enum-type */
 };
 
-struct cc_node_type_type_def {
-	struct cc_node	*type;
-};
-
 /*
  * sym-tab stores information about each identifier declared.
  * The declaration of each identifier determines its scope. The constructs
@@ -405,15 +382,11 @@ struct cc_node_type_type_def {
  */
 enum cc_name_space_type {
 	CC_NAME_SPACE_LABEL,
-	CC_NAME_SPACE_STRUCT_TAG,
-	CC_NAME_SPACE_UNION_TAG,
-	CC_NAME_SPACE_ENUM_TAG,
-	CC_NAME_SPACE_STRUCT_MEMBER,
-	CC_NAME_SPACE_UNION_MEMBER,
+	CC_NAME_SPACE_TAG,		/* struct/union/enum */
+	CC_NAME_SPACE_MEMBER,	/* struct/union */
 	CC_NAME_SPACE_ORDINARY,
-	CC_NAME_SPACE_STANDARD_ATTRIBUTE,
-	CC_NAME_SPACE_ATTRIBUTE_PREFIX,
-	CC_NAME_SPACE_ATTRIBUTE_PREFIXED_ATTRIBUTE,
+	CC_NAME_SPACE_ATTRIBUTE,	/* std-attr + attr-prefix */
+	CC_NAME_SPACE_PREFIXED_ATTRIBUTE,
 	CC_NAME_SPACE_MAX,
 };
 
@@ -455,7 +428,7 @@ struct cc_node_symbol {
 	struct cc_node	*prev;			/* used to link same-name declarations */
 	struct cc_node	*identifier;	/* an identifier, or null */
 	struct cc_node	*type;			/* must not be null */
-	struct cc_node	*value;			/* prob. an expression */
+	struct cc_node	*init;
 	enum cc_node_type	linkage;
 	enum cc_node_type	storage;
 	enum cc_name_space_type	name_space;
@@ -475,14 +448,14 @@ struct cc_node {
 		/*
 		 * These are collectors of information during parsing. They are not
 		 * found in symtabs. Attributes are found in the type-trees when they
-		 * modify an Identifier or a Type.
+		 * modify a type, or in Identifiers whney they modify idents.
 		 */
-		struct cc_node_attributes				*attributes;
-		struct cc_node_type_specifiers			*type_specifiers;
-		struct cc_node_type_qualifiers			*type_qualifiers;
-		struct cc_node_function_specifiers		*function_specifiers;
-		struct cc_node_storage_specifiers		*storage_specifiers;
-		struct cc_node_alignment_specifiers		*alignment_specifiers;
+		struct cc_node_attributes               *attributes;
+		struct cc_node_type_specifiers          *type_specifiers;
+		struct cc_node_type_qualifiers          *type_qualifiers;
+		struct cc_node_function_specifiers      *function_specifiers;
+		struct cc_node_storage_specifiers       *storage_specifiers;
+		struct cc_node_alignment_specifiers     *alignment_specifiers;
 		struct cc_node_declaration_specifiers	*declaration_specifiers;
 		struct cc_node_declarator				*declarator;
 		/* Declarator also functions as AbstractDeclarator */
@@ -560,6 +533,12 @@ static inline
 bool cc_node_is_string_literal(const struct cc_node *this)
 {
 	return cc_node_type_is_string_literal(cc_node_type(this));
+}
+
+static inline
+bool cc_node_is_symbol(const struct cc_node *this)
+{
+	return cc_node_type_is_symbol(cc_node_type(this));
 }
 
 static inline

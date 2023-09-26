@@ -62,6 +62,20 @@ void cc_token_print(const struct cc_token *this)
 		printf(" '%s'", this->string);
 	printf("\n");
 }
+
+//static
+bool cc_token_is_standard_attribute(const struct cc_token *this,
+									const enum cc_token_type type)
+{
+	const char *strings[2];
+
+	assert(type >= CC_TOKEN_NO_RETURN && type <= CC_TOKEN_REPRODUCIBLE);
+	if (!cc_token_is_identifier(this))
+		return false;
+	strings[0] = cc_token_string(this);
+	strings[1] = g_key_words[type - CC_TOKEN_ATOMIC];
+	return strcmp(strings[0], strings[1]) == 0;
+}
 /*****************************************************************************/
 static
 void cc_node_delete(void *p)
@@ -102,12 +116,14 @@ struct cc_node *cc_node_new_symbols(const enum cc_scope scope)
 }
 
 static
-struct cc_node *cc_node_new_symbol(struct cc_node *symbols)
+struct cc_node *cc_node_new_symbol(struct cc_node *symbols,
+								   const enum cc_node_type type)
 {
 	struct cc_node *this;
 	struct cc_node_symbol *s;
 
-	this = cc_node_new(CC_NODE_SYMBOL);
+	assert(cc_node_type_is_symbol(type));
+	this = cc_node_new(type);
 	s = calloc(1, sizeof(*s));
 	if (this == NULL || s == NULL)
 		return NULL;
@@ -173,26 +189,12 @@ struct cc_node *cc_node_new_storage_specifiers(void)
 }
 
 //static
-struct cc_node *cc_node_new_alignment_specifiers(void)
-{
-	struct cc_node *this;
-	struct cc_node_alignment_specifiers *as;
-
-	this = cc_node_new(CC_NODE_ALIGNMENT_SPECIFIERS);
-	as = calloc(1, sizeof(*as));
-	if (this == NULL || as == NULL)
-		return NULL;
-	this->u.alignment_specifiers = as;
-	return this;
-}
-
-//static
 struct cc_node *cc_node_new_attributes(void)
 {
 	struct cc_node *this;
 	struct cc_node_attributes *a;
 
-	this = cc_node_new(CC_NODE_ALIGNMENT_SPECIFIERS);
+	this = cc_node_new(CC_NODE_ATTRIBUTES);
 	a = calloc(1, sizeof(*a));
 	if (this == NULL || a == NULL)
 		return NULL;
@@ -218,22 +220,21 @@ struct cc_node *cc_node_new_block(const enum cc_scope scope)
 }
 
 //static
-struct cc_node *cc_node_new_type_array(struct cc_node *type)
+struct cc_node *cc_node_new_type_array(void)
 {
 	struct cc_node *this;
 	struct cc_node_type_array *ta;
 
-	this = cc_node_new(CC_NODE_TYPE_FUNCTION);
+	this = cc_node_new(CC_NODE_TYPE_ARRAY);
 	ta = calloc(1, sizeof(*ta));
 	if (this == NULL || ta == NULL)
 		return NULL;
-	ta->type = type;	/* The ret type */
 	this->u.type_array = ta;
 	return this;
 }
 
 static
-struct cc_node *cc_node_new_type_function(struct cc_node *type)
+struct cc_node *cc_node_new_type_function(void)
 {
 	struct cc_node *this, *block;
 	struct cc_node_type_function *tf;
@@ -248,24 +249,14 @@ struct cc_node *cc_node_new_type_function(struct cc_node *type)
 	if (this == NULL || tf == NULL || block == NULL)
 		return NULL;
 	tf->block = block;
-	tf->type = type;	/* The ret type */
 	this->u.type_function = tf;
 	return this;
 }
 
 static
-struct cc_node *cc_node_new_type_pointer(struct cc_node *type)
+struct cc_node *cc_node_new_type_pointer(void)
 {
-	struct cc_node *this;
-	struct cc_node_type_pointer *tp;
-
-	this = cc_node_new(CC_NODE_TYPE_POINTER);
-	tp = calloc(1, sizeof(*tp));
-	if (this == NULL || tp == NULL)
-		return NULL;
-	tp->type = type;
-	this->u.type_pointer = tp;
-	return this;
+	return cc_node_new(CC_NODE_TYPE_POINTER);
 }
 
 static
@@ -360,6 +351,8 @@ void *cc_node_assert_type(struct cc_node *this,
 		ret = this->u.symbols;
 		break;
 	case CC_NODE_SYMBOL:
+	case CC_NODE_SYMBOL_TYPE:
+	case CC_NODE_SYMBOL_TYPE_DEF:
 		ret = this->u.symbol;
 		break;
 	case CC_NODE_TYPE_BOOL:
@@ -643,8 +636,9 @@ static
 err_t cc_node_add_symbol(struct cc_node *this,
 						 struct cc_node *node)
 {
+	const enum cc_node_type type = cc_node_type(node);
 	struct cc_node_symbols *ss = cc_node_assert_type(this, CC_NODE_SYMBOLS);
-	struct cc_node_symbol *s = cc_node_assert_type(node, CC_NODE_SYMBOL);
+	struct cc_node_symbol *s = cc_node_assert_type(node, type);
 	struct ptr_queue *q = &ss->entries[s->name_space];
 	return ptrq_add_tail(q, node);
 }
@@ -657,21 +651,22 @@ err_t cc_node_symbols_find_type_def(const struct cc_node_symbols *this,
 	int i;
 	err_t err;
 	const struct ptr_queue *q;
-	struct cc_node *e;
+	struct cc_node *n;
 	struct cc_node_identifier *ident;
 	struct cc_node_symbol *s;
 	const enum cc_name_space_type ns = CC_NAME_SPACE_ORDINARY;
 	/* type-def-names are in ordinary name-space */
 
 	q = &this->entries[ns];
-	PTRQ_FOR_EACH(q, i, e) {
-		s = cc_node_assert_type(e, CC_NODE_SYMBOL);
-		assert(s->value);
-		e = s->value;
-		if (cc_node_type(e) != CC_NODE_TYPE_TYPE_DEF)
+	PTRQ_FOR_EACH(q, i, n) {
+		assert(cc_node_is_symbol(n));	/* only symbols in a symtab */
+		if (cc_node_type(n) != CC_NODE_SYMBOL_TYPE_DEF)
 			continue;
-		e = s->identifier;
-		ident = cc_node_assert_type(e, CC_NODE_IDENTIFIER);
+		s = cc_node_assert_type(n, CC_NODE_SYMBOL_TYPE_DEF);
+
+		n = s->identifier;
+		assert(n);
+		ident = cc_node_assert_type(n, CC_NODE_IDENTIFIER);
 		assert(ident->string);
 		if (strcmp(ident->string, name))
 			continue;
@@ -746,15 +741,15 @@ err_t parser_build_types(struct parser *this)
 			n[0] = cc_node_new_type_integer(types[i]);
 		else
 			n[0] = cc_node_new(types[i]);	/* CC_NODE_TYPE_VOID */
-		n[1] = cc_node_new_symbol(this->symbols);
+		n[1] = cc_node_new_symbol(this->symbols, CC_NODE_SYMBOL_TYPE);
 		if (n[0] == NULL || n[1] == NULL)
 			return ENOMEM;
 		if (i > 0) {
 			ti = cc_node_assert_type(n[0], types[i]);
 			*ti = ints[i];
 		}
-		s = cc_node_assert_type(n[1], CC_NODE_SYMBOL);
-		s->value = s->type = n[0];		/* For types, value == type. */
+		s = cc_node_assert_type(n[1], CC_NODE_SYMBOL_TYPE);
+		s->type = n[0];		/* For types, value == type. */
 		s->linkage = CC_LINKAGE_NONE;	/* types have no linkages */
 		s->storage = CC_STORAGE_NONE;	/* types have no storage duration */
 		s->name_space = CC_NAME_SPACE_ORDINARY;
@@ -1106,12 +1101,13 @@ err_t cc_token_convert(struct cc_token *this)
 		err = cc_token_convert_number(this);
 	return err;
 }
-
+/*****************************************************************************/
 static
 err_t cc_token_stream_read_token(struct cc_token_stream *this,
 								 struct cc_token **out)
 {
 	struct cc_token *token;
+	bool is_ident;
 	char *src;
 	size_t src_len;
 	enum cc_token_type type;	/* lxr_token_type == cc_token_type */
@@ -1130,37 +1126,49 @@ err_t cc_token_stream_read_token(struct cc_token_stream *this,
 		return ENOMEM;
 	token->type = type;
 
-	/* key-words and punctuators do not have a src-len. */
-#if 0
-	if (cc_token_type_is_key_word(type)) {
-		token->string = g_key_words[type - CC_TOKEN_ATOMIC];
-		token->string_len = strlen(token->string);
-		goto done;
-	}
-	if (cc_token_type_is_punctuator(type)) {
-		token->string = g_punctuators[type - CC_TOKEN_LEFT_BRACE];
-		token->string_len = strlen(token->string);
-		goto done;
-	}
-#else
+	/* cc_token_type_is_key_word only checks for c-key-words */
 	if (cc_token_type_is_key_word(type) ||
 		cc_token_type_is_punctuator(type)) {
+		/* c-key-words, punctuators, do not alloc string */
 		token->string = NULL;
 		token->string_len = 0;
 		goto done;
 	}
-#endif
-	memcpy(&src_len, &this->buffer[position], sizeof(src_len));
-	position += sizeof(src_len);
-	src = NULL;
-	if (src_len) {
-		src = malloc(src_len + 1);
+
+	/*
+	 * These ranges are converted into identifiers:
+	 * [LXR_TOKEN_NO_RETURN, LXR_TOKEN_REPRODUCIBLE]
+	 * [LXR_TOKEN_DIRECTIVE_DEFINE, LXR_TOKEN_DIRECTIVE_WARNING]
+	 * This range must be converted to an Identifier.
+	 */
+	is_ident = false;
+	if (!is_ident &&
+		type >= CC_TOKEN_NO_RETURN &&
+		type <= CC_TOKEN_REPRODUCIBLE)
+		is_ident = true;
+	if (!is_ident &&
+		type >= CC_TOKEN_DIRECTIVE_DEFINE &&
+		type <= CC_TOKEN_DIRECTIVE_WARNING)
+		is_ident = true;
+	if (is_ident) {
+		token->string = src = strdup(g_key_words[type - CC_TOKEN_ATOMIC]);
 		if (src == NULL)
 			return ENOMEM;
-		src[src_len] = 0;
-		memcpy(src, &this->buffer[position], src_len);
-		position += src_len;
+		token->string_len = strlen(token->string);
+		token->type = CC_TOKEN_IDENTIFIER;
+		goto done;
 	}
+	memcpy(&src_len, &this->buffer[position], sizeof(src_len));
+	assert(src_len);
+
+	position += sizeof(src_len);
+	src = NULL;
+	src = malloc(src_len + 1);
+	if (src == NULL)
+		return ENOMEM;
+	src[src_len] = 0;
+	memcpy(src, &this->buffer[position], src_len);
+	position += src_len;
 	token->string = src;
 	token->string_len = src_len;
 done:
@@ -1381,7 +1389,7 @@ err_t parser_parse_type_qualifier(struct parser *this,
 
 static
 err_t parser_parse_alignment_specifier(struct parser *this,
-									   struct cc_node **out)
+									   int *out)
 {
 	assert(0);
 	(void)this;
@@ -1433,15 +1441,14 @@ err_t parser_parse_declaration_specifier(struct parser *this,
 	struct cc_node_declaration_specifiers *ds;
 	struct cc_token_stream *stream;
 	struct cc_token *tokens[2];
-	struct cc_node **nodes[5];
+	struct cc_node **nodes[4];
 	/* typedef err_t func(struct parser *, struct cc_node *); */
-	/* static func * const funcs[5] = */
-	static err_t (* const funcs[5])(struct parser *, struct cc_node **) = {
+	/* static func * const funcs[4] = */
+	static err_t (* const funcs[4])(struct parser *, struct cc_node **) = {
 		parser_parse_type_specifier,
 		parser_parse_type_qualifier,
 		parser_parse_function_specifier,
 		parser_parse_storage_specifier,
-		parser_parse_alignment_specifier,
 	};
 	stream = parser_token_stream(this);
 	ds = cc_node_assert_type(parent, CC_NODE_DECLARATION_SPECIFIERS);
@@ -1451,7 +1458,9 @@ err_t parser_parse_declaration_specifier(struct parser *this,
 	nodes[1] = &ds->type_qualifiers;
 	nodes[2] = &ds->function_specifiers;
 	nodes[3] = &ds->storage_specifiers;
-	nodes[4] = &ds->alignment_specifiers;
+
+	if (cc_token_is_alignment_specifier(tokens[0]))
+		return parser_parse_alignment_specifier(this, &ds->alignment);
 
 	if (cc_token_is_type_specifier(tokens[0]))
 		i = 0;
@@ -1459,19 +1468,17 @@ err_t parser_parse_declaration_specifier(struct parser *this,
 		i = 1;
 	else if (cc_token_is_function_specifier(tokens[0]))
 		i = 2;
-	else if (cc_token_is_storage_class_specifier(tokens[0]))
+	else if (cc_token_is_storage_specifier(tokens[0]))
 		i = 3;
-	else if (cc_token_is_alignment_specifier(tokens[0]))
-		i = 4;
 	else
 		return EINVAL;
 
-	/* Atomic may represent either a TypeSpecifier or a TypeQualifier */
 	if (cc_token_type(tokens[0]) == CC_TOKEN_ATOMIC) {
+		/* Atomic may represent either a TypeSpecifier or a TypeQualifier */
+		assert(i == 0);	/* Because check for type_specifier is first */
 		err = cc_token_stream_peek_entry(stream, 1, &tokens[1]);
-		i = 1;
-		if (!err && cc_token_type(tokens[1]) == CC_TOKEN_LEFT_PAREN)
-			i = 0;
+		if (err || cc_token_type(tokens[1]) != CC_TOKEN_LEFT_PAREN)
+			i = 1;
 	}
 	return funcs[i](this, nodes[i]);
 }
@@ -1510,16 +1517,17 @@ err_t parser_parse_declaration_specifiers(struct parser *this,
 		if (cc_token_is_type_specifier(token) ||
 			cc_token_is_type_qualifier(token) ||
 			cc_token_is_alignment_specifier(token) ||
-			cc_token_is_storage_class_specifier(token) ||
+			cc_token_is_storage_specifier(token) ||
 			cc_token_is_function_specifier(token))
 			is_specifier = true;
 		if (!is_specifier)
 			break;
 
 		/* Determine if this (non-keyword) Identifier is a TypedefName */
-		if (cc_token_type(token) == CC_TOKEN_IDENTIFIER) {
+		if (cc_token_is_identifier(token)) {
 			/* Should be a TypedefName. If not, break */
 			str = cc_token_string(token);
+			assert(str);
 			assert(this->symbols);
 			err = cc_node_find_type_def(this->symbols, str, &stes);
 			if (err == ENOENT) {
@@ -1614,7 +1622,7 @@ err_t parser_process_declaration(struct parser *this,
 	if (cc_node_type(attributes) == CC_NODE_DECLARATION_SPECIFIERS) {
 		specifiers = attributes;
 		attributes = NULL;
-	} else if (cc_node_type(attributes) != CC_NODE_ATTRIBUTE_SPECIFIERS) {
+	} else if (cc_node_type(attributes) != CC_NODE_ATTRIBUTES) {
 		return EINVAL;
 	}
 	if (specifiers == NULL) {
@@ -1714,7 +1722,6 @@ err_t parser_parse_identifier(struct parser *this,
 /*****************************************************************************/
 static
 err_t parser_parse_type_pointer(struct parser *this,
-								struct cc_node *type,
 								struct cc_node **out)
 {
 	err_t err;
@@ -1730,7 +1737,7 @@ err_t parser_parse_type_pointer(struct parser *this,
 	assert(cc_token_type(token) == CC_TOKEN_MUL);
 	cc_token_delete(token);
 
-	out[0] = cc_node_new_type_pointer(type);
+	out[0] = cc_node_new_type_pointer();
 	if (out[0] == NULL)
 		return ENOMEM;
 
@@ -1850,7 +1857,6 @@ err_t parser_parse_parameter_declaration(struct parser *this)
  */
 static
 err_t parser_parse_type_function(struct parser *this,
-								 struct cc_node *ret_type,
 								 struct cc_node **out)
 {
 	err_t err;
@@ -1870,7 +1876,7 @@ err_t parser_parse_type_function(struct parser *this,
 	 * The resultant type is then the type of the function.
 	 */
 	assert(out[0] == NULL);
-	out[0] = cc_node_new_type_function(ret_type);
+	out[0] = cc_node_new_type_function();
 	if (out[0] == NULL)
 		return ENOMEM;
 
@@ -1944,7 +1950,7 @@ err_t parser_parse_declarator_function(struct parser *this,
 
 	/* ret-type of the function not yet known */
 	node = NULL;
-	err = parser_parse_type_function(this, NULL, &node);
+	err = parser_parse_type_function(this, &node);
 	if (err)
 		return err;
 	/* TODO: Verify the structure of the node */
@@ -2033,7 +2039,7 @@ err_t parser_parse_declarator(struct parser *this,
 			if (ident_found)
 				return EINVAL;
 			node = NULL;
-			err = parser_parse_type_pointer(this, NULL, &node);
+			err = parser_parse_type_pointer(this, &node);
 			if (!err)
 				err = ptrq_add_tail(&stack, node);
 			if (err)
