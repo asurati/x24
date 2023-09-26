@@ -517,6 +517,9 @@ UnlabeledStatement:	PrimaryBlock
 UnlabeledStatement:	AttributeSpecifierSequence	PrimaryBlock
 UnlabeledStatement:	JumpStatement
 UnlabeledStatement:	AttributeSpecifierSequence	JumpStatement
+# From the standard:
+# The optional attribute specifier sequence appertains to the respective
+# statement.
 
 PrimaryBlock:	CompoundStatement
 PrimaryBlock:	SelectionStatement
@@ -548,6 +551,8 @@ BlockItem:	Label
 ExpressionStatement:	;
 ExpressionStatement:	Expression	;
 ExpressionStatement:	AttributeSpecifierSequence	Expression	;
+# From the standard:
+# The attribute specifier sequence appertains to the expression
 
 SelectionStatement:	if	(	Expression	)	SecondaryBlock
 SelectionStatement:	if	(	Expression	)	SecondaryBlock	else	SecondaryBlock
@@ -582,5 +587,7 @@ ExternalDeclaration:	Declaration
 
 FunctionDefinition:	DeclarationSpecifiers	Declarator	FunctionBody
 FunctionDefinition:	AttributeSpecifierSequence	DeclarationSpecifiers	Declarator	FunctionBody
+# The optional attribute specifier sequence in a function definition appertains
+# to the function
 
 FunctionBody:	CompoundStatement
