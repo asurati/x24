@@ -142,7 +142,7 @@ DEF(VOID)
 DEF(VOLATILE)
 DEF(WHILE)
 
-/* Std. Attributes. These are not keywords */
+/* Std. Attributes. These are not c-keywords */
 DEF(NO_RETURN)
 DEF(DEPRECATED)
 DEF(FALL_THROUGH)
