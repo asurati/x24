@@ -1317,6 +1317,17 @@ err_t parser_parse_type_specifier_type_of(struct parser *this,
 	return ENOTSUP;
 }
 
+/* single-token type-specifiers */
+static
+err_t parser_parse_type_specifier_single(struct parser *this,
+										 struct cc_node *node)
+{
+	assert(0);
+	(void)this;
+	(void)node;
+	return ENOTSUP;
+}
+
 static
 err_t parser_parse_type_specifier(struct parser *this,
 								  struct cc_node **out)
@@ -1330,14 +1341,14 @@ err_t parser_parse_type_specifier(struct parser *this,
 		out[0] = cc_node_new_type_specifiers();
 	if (out[0] == NULL)
 		return ENOMEM;
+
 	stream = parser_token_stream(this);
 	cc_node_assert_type(out[0], CC_NODE_TYPE_SPECIFIERS);
-
 	err = cc_token_stream_peek_head(stream, &token);
 	assert(err == ESUCCESS);
 	type = cc_token_type(token);
 
-	/* Try to update the bitmask */
+	/* Try to update the bitmask, and validate this type-spec. */
 	err = cc_node_add_type_specifier(out[0], type);
 	if (err)
 		return err;
@@ -1354,12 +1365,7 @@ err_t parser_parse_type_specifier(struct parser *this,
 	if (type == CC_TOKEN_TYPE_OF ||
 		type == CC_TOKEN_TYPE_OF_UNQUAL)
 		return parser_parse_type_specifier_type_of(this, out[0]);
-
-	/* Else, single-token specifiers */
-	err = cc_token_stream_remove_head(stream, &token);
-	assert(err == ESUCCESS);
-	cc_token_delete(token);
-	return err;
+	return parser_parse_type_specifier_single(this, out[0]);
 }
 /*****************************************************************************/
 static
