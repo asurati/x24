@@ -238,16 +238,16 @@ struct cc_node *cc_node_new_storage_specifiers(void)
 }
 
 //static
-struct cc_node *cc_node_new_attributes(void)
+struct cc_node *cc_node_new_attribute_specifiers(void)
 {
 	struct cc_node *this;
-	struct cc_node_attributes *a;
+	struct cc_node_attribute_specifiers *as;
 
-	this = cc_node_new(CC_NODE_ATTRIBUTES);
-	a = calloc(1, sizeof(*a));
-	if (this == NULL || a == NULL)
+	this = cc_node_new(CC_NODE_ATTRIBUTE_SPECIFIERS);
+	as = calloc(1, sizeof(*as));
+	if (this == NULL || as == NULL)
 		return NULL;
-	this->u.attributes = a;
+	this->u.attribute_specifiers = as;
 	return this;
 }
 
@@ -389,18 +389,24 @@ void *cc_node_assert_type(struct cc_node *this,
 }
 /*****************************************************************************/
 static
-err_t cc_node_type_alignment_apply(struct cc_node *this,
-								   const int alignment,
-								   struct cc_type **out)
+err_t cc_node_alignment_specifiers_apply(const
+										 struct cc_node_alignment_specifiers
+										 *this,
+										 struct cc_type **out)
 {
+	assert(0);
+	(void)this;
+	(void)out;
+	return ENOTSUP;
 }
 
 static
-err_t cc_node_apply_type_alignment(struct cc_node *this,
-								   const int alignment,
-								   struct cc_type **out)
+err_t cc_node_apply_alignment_specifiers(struct cc_node *this,
+										 struct cc_type **out)
 {
-	return cc_node_type_alignment_apply(this, alignment, out);
+	struct cc_node_alignment_specifiers *as;
+	as = cc_node_assert_type(this, CC_NODE_ALIGNMENT_SPECIFIERS);
+	return cc_node_alignment_specifiers_apply(as, out);
 }
 /*****************************************************************************/
 static
@@ -506,9 +512,13 @@ err_t cc_node_add_type_qualifier(struct cc_node *this,
 }
 
 static
-err_t cc_node_type_qualifiers_apply(struct cc_node_type_qualifiers *this,
+err_t cc_node_type_qualifiers_apply(const struct cc_node_type_qualifiers *this,
 									struct cc_type **out)
 {
+	assert(0);
+	(void)this;
+	(void)out;
+	return ENOTSUP;
 }
 
 static
@@ -680,9 +690,13 @@ err_t cc_node_add_type_specifier(struct cc_node *this,
 }
 
 static
-err_t cc_node_type_specifiers_apply(struct cc_node_type_specifiers *this,
+err_t cc_node_type_specifiers_apply(const struct cc_node_type_specifiers *this,
 									struct cc_type **out)
 {
+	assert(0);
+	(void)this;
+	(void)out;
+	return ENOTSUP;
 }
 
 static
@@ -692,6 +706,27 @@ err_t cc_node_apply_type_specifiers(struct cc_node *this,
 	struct cc_node_type_specifiers *ts;
 	ts = cc_node_assert_type(this, CC_NODE_TYPE_SPECIFIERS);
 	return cc_node_type_specifiers_apply(ts, out);
+}
+/*****************************************************************************/
+static
+err_t cc_node_attribute_specifiers_apply(const
+										 struct cc_node_attribute_specifiers
+										 *this,
+										 struct cc_type **out)
+{
+	assert(0);
+	(void)this;
+	(void)out;
+	return ENOTSUP;
+}
+
+static
+err_t cc_node_apply_attribute_specifiers(struct cc_node *this,
+										 struct cc_type **out)
+{
+	struct cc_node_attribute_specifiers *as;
+	as = cc_node_assert_type(this, CC_NODE_ATTRIBUTE_SPECIFIERS);
+	return cc_node_attribute_specifiers_apply(as, out);
 }
 /*****************************************************************************/
 static
@@ -748,6 +783,7 @@ err_t cc_node_find_type_def(struct cc_node *this,
 	err_t err;
 	const struct cc_node_symbols *ss;
 
+	assert(this);
 	while (this) {
 		ss = cc_node_assert_type(this, CC_NODE_SYMBOLS);
 		err = cc_node_symbols_find_type_def(ss, name, out);
@@ -1320,8 +1356,8 @@ err_t parser_parse_static_assert_declaration(struct parser *this,
 
 /* Attributes can apply to both types and identifiers */
 static
-err_t parser_parse_attributes(struct parser *this,
-							  struct cc_node **out)
+err_t parser_parse_attribute_specifiers(struct parser *this,
+										struct cc_node **out)
 {
 	assert(0);
 	(void)this;
@@ -1457,7 +1493,7 @@ err_t parser_parse_type_qualifier(struct parser *this,
 
 static
 err_t parser_parse_alignment_specifier(struct parser *this,
-									   int *out)
+									   struct cc_node **out)
 {
 	assert(0);
 	(void)this;
@@ -1505,19 +1541,23 @@ err_t parser_parse_declaration_specifier(struct parser *this,
 										 struct cc_node *parent)
 {
 	err_t err;
+	bool apply_type_qualifiers, apply_alignment_specifiers;
 	int i;
 	struct cc_node_declaration_specifiers *ds;
 	struct cc_token_stream *stream;
 	struct cc_token *tokens[2];
-	struct cc_node **nodes[4];
+	struct cc_node **nodes[5];
 	/* typedef err_t func(struct parser *, struct cc_node *); */
-	/* static func * const funcs[4] = */
-	static err_t (* const parsers[4])(struct parser *, struct cc_node **) = {
+	/* static func * const funcs[5] = */
+	static err_t (* const parsers[5])(struct parser *, struct cc_node **) = {
 		parser_parse_type_specifier,
 		parser_parse_type_qualifier,
 		parser_parse_function_specifier,
 		parser_parse_storage_specifier,
+		parser_parse_alignment_specifier,
 	};
+	apply_alignment_specifiers = false;
+	apply_type_qualifiers = false;
 	stream = parser_token_stream(this);
 	ds = cc_node_assert_type(parent, CC_NODE_DECLARATION_SPECIFIERS);
 	err = cc_token_stream_peek_head(stream, &tokens[0]);
@@ -1526,12 +1566,7 @@ err_t parser_parse_declaration_specifier(struct parser *this,
 	nodes[1] = &ds->type_qualifiers;
 	nodes[2] = &ds->function_specifiers;
 	nodes[3] = &ds->storage_specifiers;
-
-	if (cc_token_is_alignment_specifier(tokens[0])) {
-		i = 4;
-		err = parser_parse_alignment_specifier(this, &ds->alignment);
-		goto apply;
-	}
+	nodes[4] = &ds->alignment_specifiers;
 
 	if (cc_token_is_type_specifier(tokens[0]))
 		i = 0;
@@ -1541,6 +1576,8 @@ err_t parser_parse_declaration_specifier(struct parser *this,
 		i = 2;
 	else if (cc_token_is_storage_specifier(tokens[0]))
 		i = 3;
+	else if (cc_token_is_alignment_specifier(tokens[0]))
+		i = 4;
 	else
 		return EINVAL;
 
@@ -1551,25 +1588,23 @@ err_t parser_parse_declaration_specifier(struct parser *this,
 		if (err || cc_token_type(tokens[1]) != CC_TOKEN_LEFT_PAREN)
 			i = 1;
 	}
-	err = funcs[i](this, nodes[i]);
-apply:
+	err = parsers[i](this, nodes[i]);
 	/* Don't apply if type-sepcifier isn't available yet */
 	if (err || ds->type == NULL)
 		return err;
 	/* Apply the specifier/qualifier to the type */
 	if (i == 0) {
-		err = cc_node_apply_type_specifiers(nodes[0], &ds->type);
+		err = cc_node_apply_type_specifiers(*nodes[i], &ds->type);
 		/* Apply align/quals if collected before type-specifiers */
-		if (!err && nodes[1])
-			err = cc_node_apply_type_qualifiers(nodes[1], &ds->type);
-		if (!err && ds->alignment)
-			err = cc_node_apply_type_alignment(NULL, ds->alignment, &ds->type);
-		return err;
+		if (!err && *nodes[1])
+			apply_type_qualifiers = true;
+		if (!err && *nodes[4])
+			apply_alignment_specifiers = true;
 	}
-	if (i == 1)
-		return cc_node_apply_type_qualifiers(nodes[1], &ds->type);
-	if (i == 4)
-		return cc_node_apply_type_alignment(NULL, ds->alignment, &ds->type);
+	if (i == 1 || apply_type_qualifiers)
+		return cc_node_apply_type_qualifiers(*nodes[1], &ds->type);
+	if (i == 4 || apply_alignment_specifiers)
+		return cc_node_apply_alignment_specifiers(*nodes[4], &ds->type);
 	return err;
 }
 /*****************************************************************************/
@@ -1585,6 +1620,7 @@ err_t parser_parse_declaration_specifiers(struct parser *this,
 	struct cc_node *attributes;
 	struct cc_token_stream *stream;
 	struct cc_token *token;
+	struct cc_node_declaration_specifiers *ds;
 
 	/*
 	 * array of DeclarationSpecifier elements. The array may optionally end
@@ -1643,9 +1679,11 @@ err_t parser_parse_declaration_specifiers(struct parser *this,
 		if (!parser_has_attributes(this))
 			continue;
 		attributes = NULL;
-		err = parser_parse_attributes(this, &attributes);
+		err = parser_parse_attribute_specifiers(this, &attributes);
 		if (!err)
-			err = cc_node_add_tail_child(out[0], attributes);
+			ds = cc_node_assert_type(out[0], CC_NODE_DECLARATION_SPECIFIERS);
+		if (!err)
+			err = cc_node_apply_attribute_specifiers(attributes, &ds->type);
 		if (err)
 			return err;
 		break;
@@ -1712,7 +1750,7 @@ err_t parser_process_declaration(struct parser *this,
 	if (cc_node_type(attributes) == CC_NODE_DECLARATION_SPECIFIERS) {
 		specifiers = attributes;
 		attributes = NULL;
-	} else if (cc_node_type(attributes) != CC_NODE_ATTRIBUTES) {
+	} else if (cc_node_type(attributes) != CC_NODE_ATTRIBUTE_SPECIFIERS) {
 		return EINVAL;
 	}
 	if (specifiers == NULL) {
@@ -1810,6 +1848,7 @@ err_t parser_parse_identifier(struct parser *this,
 	return err;
 }
 /*****************************************************************************/
+#if 0
 static
 err_t parser_parse_type_pointer(struct parser *this,
 								struct cc_node **out)
@@ -1838,7 +1877,7 @@ err_t parser_parse_type_pointer(struct parser *this,
 		 * pointed-to object.
 		 */
 		attributes = NULL;
-		err = parser_parse_attributes(this, &attributes);
+		err = parser_parse_attribute_specifiers(this, &attributes);
 		if (!err)
 			err = cc_node_add_tail_child(out[0], attributes);
 		if (err)
@@ -1863,6 +1902,7 @@ err_t parser_parse_type_pointer(struct parser *this,
 	}
 	return cc_node_add_tail_child(out[0], node);
 }
+#endif
 /*****************************************************************************/
 /*
  * Caters to both ArrayDeclarator and AbstractArrayDeclarator.
@@ -1913,7 +1953,7 @@ err_t parser_parse_parameter_declaration(struct parser *this)
 	/* Is it an AttributeDeclaration? */
 	attributes = specifiers = declarator = NULL;
 	if (parser_has_attributes(this)) {
-		err = parser_parse_attributes(this, &attributes);
+		err = parser_parse_attribute_specifiers(this, &attributes);
 		if (err)
 			return err;
 	}
@@ -1966,7 +2006,9 @@ err_t parser_parse_type_function(struct parser *this,
 	 * The resultant type is then the type of the function.
 	 */
 	assert(out[0] == NULL);
+#if 0
 	out[0] = cc_node_new_type_function();
+#endif
 	if (out[0] == NULL)
 		return ENOMEM;
 
@@ -2261,7 +2303,7 @@ err_t parser_parse_external_declaration(struct parser *this,
 	/* Is it an AttributeDeclaration? */
 	attributes = NULL;
 	if (parser_has_attributes(this)) {
-		err = parser_parse_attributes(this, &attributes);
+		err = parser_parse_attribute_specifiers(this, &attributes);
 		if (!err)
 			err = cc_token_stream_peek_head(stream, &token);
 		if (!err && cc_token_type(token) == CC_TOKEN_SEMI_COLON) {
@@ -2301,7 +2343,10 @@ err_t parser_parse_external_declaration(struct parser *this,
 		return parser_process_declaration(this, &nodes);
 	}
 
-	/* Parse a single Declarator first */
+	/*
+	 * Parse a single Declarator first. TODO Pass specifiers.type so that
+	 * it can be modified further by each declarator according to its needs.
+	 */
 	err = parser_parse_declarator(this, &declarator);
 	/* Should not be an AbstractDeclarator */
 	if (!err)

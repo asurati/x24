@@ -375,19 +375,23 @@ struct cc_node_function_specifiers {
 	int	mask;
 };
 
-struct cc_node_attributes {
+struct cc_node_attribute_specifiers {
 	int	mask;
+};
+
+struct cc_node_alignment_specifiers {
+	int	alignment;
 };
 
 /* With each DeclarationSpecifier, update the type */
 struct cc_node_declaration_specifiers {
-	struct cc_type	*type;
+	struct cc_type	*type;	/* The resultant type */
 	struct cc_node	*type_specifiers;
 	struct cc_node	*type_qualifiers;		/* applies to type */
-	struct cc_node	*attributes;			/* applies to type */
+	struct cc_node	*attribute_specifiers;	/* applies to type */
+	struct cc_node	*alignment_specifiers;	/* applies to type */
 	struct cc_node	*storage_specifiers;	/* applies to ident */
 	struct cc_node	*function_specifiers;	/* applies to ident */
-	int	alignment;	/* applies to type */
 };
 
 struct cc_node_declarator {
@@ -524,7 +528,7 @@ struct cc_node {
 		 * found in symtabs. Attributes are found in the type-trees when they
 		 * modify a type, or in Identifiers whney they modify idents.
 		 */
-		struct cc_node_attributes               *attributes;
+		struct cc_node_attribute_specifiers		*attribute_specifiers;
 		struct cc_node_type_specifiers          *type_specifiers;
 		struct cc_node_type_qualifiers          *type_qualifiers;
 		struct cc_node_function_specifiers      *function_specifiers;
