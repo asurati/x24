@@ -11,7 +11,7 @@
 
 #include <inc/bits.h>
 #include <inc/types.h>
-
+/*****************************************************************************/
 /* Only std attributes */
 #define CC_ATTRIBUTE_DEPRECATED_POS		0
 #define CC_ATTRIBUTE_FALL_THROUGH_POS	1
@@ -103,6 +103,134 @@
 #define CC_TYPE_SPECIFIER_TYPE_DEF_NAME_BITS	1
 #define CC_TYPE_SPECIFIER_TYPE_OF_BITS			1
 #define CC_TYPE_SPECIFIER_TYPE_OF_UNQUAL_BITS	1
+/*****************************************************************************/
+struct cc_node;
+enum cc_type_type {
+	CC_TYPE_INVALID,
+
+	CC_TYPE_VOID,
+	CC_TYPE_BOOL,
+
+	CC_TYPE_CHAR,
+	CC_TYPE_SHORT,
+	CC_TYPE_INT,
+	CC_TYPE_LONG,
+	CC_TYPE_LONG_LONG,
+
+	CC_TYPE_BIT_FIELD,
+	CC_TYPE_BIT_INT,
+
+	CC_TYPE_SIGNED,
+	CC_TYPE_UNSIGNED,
+
+	CC_TYPE_ATOMIC,
+	CC_TYPE_POINTER,
+	CC_TYPE_ARRAY,
+	CC_TYPE_STRUCT,
+	CC_TYPE_UNION,
+	CC_TYPE_FUNCTION,
+	CC_TYPE_ENUM,
+};
+
+/*
+ * We assume that sizeof(int) >= 4 bytes = 32 bits.
+ * alignments are represented as values of type size_t. But we use int here as
+ * alignof(max_align_t) is 0x10, which is representable in an int.
+ * When an ast-node for alignof(int), for e.g., is build, the node's out_type
+ * is set to size_t, as alignof() returns its value in size_t type.
+ * If the type is bool, it is always unsigned.
+ * Any other integer-type is always signed.
+ */
+struct cc_type_integer {
+	int		width;		/* in bits. padding + value + sign */
+	int		precision;	/* in bits. value bits */
+	int		padding;	/* in bits. */
+	int		alignment;	/* in bits. */
+};
+
+struct cc_type_bit_field {
+	int width;
+	int	offset;	/* offset from start of the rep. of the underlying type */
+};
+
+/*
+ * if the array is a func-param, the type-qualifiers if any are processed,
+ * the type created, and the array is made to point to that type.
+ */
+struct cc_type_array {
+	size_t	num_elements;
+	struct cc_node	*expr;
+	bool	has_static;
+	bool	is_vla;
+};
+
+/*
+ * Used for both struct/union. Enum has the same symtab as entry.parent.
+ * The alignment of a struct can be recursively found using the alignment
+ * of its first member.
+ *
+ * The members of an anonymous structure or union are members of the containing
+ * structure or union, keeping their structure or union layout.
+ */
+struct cc_type_struct {
+	struct cc_node	*symbols;
+};
+
+/*
+ * no need for a separate cc_type_pointer structure.
+ * CC_TYPE_POINTER and the hierarchy is enough.
+ */
+
+struct cc_type_function {
+	struct cc_node	*block;
+};
+
+/* These entries are stored in scope-sym-tab[enum_tags_ns] */
+struct cc_type_enum {
+	bool	is_fixed;	/* is the underlying type fixed */
+};
+
+struct cc_type {
+	struct ptr_tree		tree;
+	enum cc_type_type	type;
+	struct cc_node		*symbol;	/* points back to type's name */
+	union {
+		struct cc_type_integer		*integer;
+		struct cc_type_bit_field	*bit_field;
+		struct cc_type_array		*array;
+		struct cc_type_struct		*struct_union;
+		struct cc_type_function		*function;
+		struct cc_type_enum			*enumeration;
+	} u;
+};
+
+#define CC_TYPE_FOR_EACH_CHILD(p, ix, c)	\
+	PTRT_FOR_EACH_CHILD(&(p)->tree, ix, c)
+
+static inline
+enum cc_type_type cc_type_type(const struct cc_type *this)
+{
+	return this->type;
+}
+
+static inline
+int cc_type_num_children(const struct cc_type *this)
+{
+	return ptrt_num_children(&this->tree);
+}
+
+static inline
+struct cc_type *cc_type_peek_child(const struct cc_type *this,
+								   const int index)
+{
+	return ptrt_peek_child(&this->tree, index);
+}
+
+static inline
+struct cc_type *cc_type_parent(struct cc_type *this)
+{
+	return ptrt_parent(&this->tree);
+}
 /*****************************************************************************/
 enum cc_node_type {
 #define DEF(t)	CC_NODE_ ## t,
@@ -230,9 +358,8 @@ bool cc_node_type_is_function_specifier(const enum cc_node_type this)
 	return this == CC_NODE_INLINE || this == CC_NODE_NO_RETURN;
 }
 /*****************************************************************************/
-struct cc_node;
 struct cc_node_type_specifiers {
-	struct cc_node	*type;
+	struct cc_type	*type;
 	int	mask;
 };
 
@@ -252,11 +379,12 @@ struct cc_node_attributes {
 	int	mask;
 };
 
+/* With each DeclarationSpecifier, update the type */
 struct cc_node_declaration_specifiers {
-	struct cc_node	*type;
+	struct cc_type	*type;
 	struct cc_node	*type_specifiers;
 	struct cc_node	*type_qualifiers;		/* applies to type */
-	struct cc_node	*attributes;	/* applies to type */
+	struct cc_node	*attributes;			/* applies to type */
 	struct cc_node	*storage_specifiers;	/* applies to ident */
 	struct cc_node	*function_specifiers;	/* applies to ident */
 	int	alignment;	/* applies to type */
@@ -299,50 +427,6 @@ struct cc_node_identifier {
 };
 
 /*
- * We assume that sizeof(int) >= 4 bytes = 32 bits.
- * alignments are represented as values of type size_t. But we use int here as
- * alignof(max_align_t) is 0x10, which is representable in an int.
- * When an ast-node for alignof(int), for e.g., is build, the node's out_type
- * is set to size_t, as alignof() returns its value in size_t type.
- * If the type is bool, it is always unsigned.
- * Any other integer-type is always signed.
- */
-struct cc_node_type_integer {
-	int		width;		/* in bits. padding + value + sign */
-	int		precision;	/* in bits. value bits */
-	int		padding;	/* in bits. */
-	int		alignment;	/* in bits. */
-};
-
-struct cc_node_type_bit_field {
-	struct cc_node	*type;	/* Underlying type: int/bool */
-	int width;
-	int	offset;	/* offset from start of the rep. of the underlying type */
-};
-
-struct cc_node_type_array {
-	size_t	num_elements;
-
-	/* These vars collect info present between [ and ] */
-	struct cc_node	*expr;
-	struct cc_node	*type_qualifiers;
-	bool	has_static;
-	bool	is_vla;
-};
-
-/*
- * Used for both struct/union. Enum has the same symtab as entry.parent.
- * The alignment of a struct can be recursively found using the alignment
- * of its first member.
- *
- * The members of an anonymous structure or union are members of the containing
- * structure or union, keeping their structure or union layout.
- */
-struct cc_node_type_struct {
-	struct cc_node	*symbols;
-};
-
-/*
  * always unnamed.
  * Goes into ordinary name-space, where the func-name also resides.
  * For func-decl, symbols contains the parameters.
@@ -356,17 +440,6 @@ struct cc_node_type_struct {
  */
 struct cc_node_block {
 	struct cc_node	*symbols;
-};
-
-/* no need for a separate cc_node_type_pointer structure */
-
-struct cc_node_type_function {
-	struct cc_node	*block;
-};
-
-/* These entries are stored in scope-sym-tab[enum_tags_ns] */
-struct cc_node_type_enum {
-	bool	is_fixed;	/* is the underlying type fixed */
 };
 
 /* These entries are stored in scope-sym-tab[ordinary_ns] */
@@ -422,12 +495,13 @@ enum cc_scope cc_node_symbols_scope(const struct cc_node_symbols *this)
  * to the type cc_node.
  * For type-defs and identifiers that are not types, type points to the
  * symtab-entry that contains the symbol for the type.
+ * the root of a type-tree is housed in SYMBOL_TYPE.type.
  */
 struct cc_node_symbol {
 	struct cc_node	*symbols;		/* The table containing this entry */
 	struct cc_node	*prev;			/* used to link same-name declarations */
 	struct cc_node	*identifier;	/* an identifier, or null */
-	struct cc_node	*type;			/* must not be null */
+	struct cc_type	*type;			/* must not be null */
 	struct cc_node	*init;
 	enum cc_node_type	linkage;
 	enum cc_node_type	storage;
@@ -459,16 +533,6 @@ struct cc_node {
 		struct cc_node_declaration_specifiers	*declaration_specifiers;
 		struct cc_node_declarator				*declarator;
 		/* Declarator also functions as AbstractDeclarator */
-
-		struct cc_node_type_integer		*type_integer;
-		struct cc_node_type_bit_field	*type_bit_field;
-		struct cc_node_type_pointer		*type_pointer;
-		struct cc_node_type_array		*type_array;
-		struct cc_node_type_struct		*type_struct;
-		struct cc_node_type_struct		*type_union;
-		struct cc_node_type_enum		*type_enum;
-		struct cc_node_type_function	*type_function;
-		struct cc_node_type_type_def	*type_type_def;
 
 		struct cc_node_symbols			*symbols;
 		struct cc_node_symbol			*symbol;
